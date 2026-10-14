@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+
+# Logs and runtime dumps
+*.log
+*.tmp
+*.png
+*.jpg
+*.jpeg
+*.webp
+!extension/*.png
+!assets/*.png
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Windows Shortcuts
+*.lnk

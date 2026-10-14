@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Antigravity Browser Bridge</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent: #6366f1;
+      --accent-hover: #4f46e5;
+      --success: #10b981;
+      --danger: #ef4444;
+      --border: #334155;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    body {
+      width: 320px;
+      background: var(--bg);
+      color: var(--text);
+      padding: 14px;
+      font-size: 13px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      color: #c7d2fe;
+    }
+    .logo-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-weight: 500;
+    }
+    .status-connected {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--success);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .status-disconnected {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--danger);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+    .status-connected .dot { background: var(--success); }
+    .status-disconnected .dot { background: var(--danger); }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+    }
+    .card-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .tab-info-title {
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 4px;
+    }
+    .tab-info-url {
+      font-size: 11px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    button {
+      flex: 1;
+      padding: 7px 10px;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s, opacity 0.2s;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background: var(--accent-hover);
+    }
+    .btn-danger {
+      background: var(--danger);
+      color: #fff;
+    }
+    .btn-secondary {
+      background: #334155;
+      color: #e2e8f0;
+    }
+    .btn-secondary:hover {
+      background: #475569;
+    }
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    .tips {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 8px;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="brand">
+      <div class="logo-dot"></div>
+      Antigravity Bridge
+      <span id="browserBadge" style="font-size: 10px; background: #312e81; color: #a5b4fc; padding: 1px 5px; border-radius: 4px; font-weight: normal; margin-left: 4px;">Edge / Chrome</span>
+    </div>
+    <div id="statusBadge" class="status-badge status-disconnected">
+      <span class="dot"></span>
+      <span id="statusText">未连接</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">当前标签页</div>
+    <div id="currentTabTitle" class="tab-info-title">加载中...</div>
+    <div id="currentTabUrl" class="tab-info-url">-</div>
+    <div class="info-row">
+      <span>Tab ID: <strong id="currentTabId">-</strong></span>
+      <span>调试状态: <strong id="debugStatus">-</strong></span>
+    </div>
+    <div class="actions">
+      <button id="toggleDebugBtn" class="btn-primary">接入当前页</button>
+      <button id="reconnectBtn" class="btn-secondary">重连服务</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">桥接服务</div>
+    <div class="info-row">
+      <span>本地地址:</span>
+      <span style="color: #cbd5e1;">ws://127.0.0.1:9223</span>
+    </div>
+    <div class="info-row">
+      <span>已接入标签页:</span>
+      <span id="attachedCount" style="color: #cbd5e1;">0</span>
+    </div>
+  </div>
+
+  <div class="tips">
+    提示：保持本地 Python Bridge 运行。Antigravity 可直接向你当前选中的浏览器标签页发送点击、求值和输入指令。
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
