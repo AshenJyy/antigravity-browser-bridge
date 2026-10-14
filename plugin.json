@@ -1,7 +1,7 @@
 {
   "name": "antigravity-browser-bridge",
   "displayName": "Antigravity Browser Bridge",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Control, inspect, and automate tasks in your real Microsoft Edge or Google Chrome browser directly via Chrome DevTools Protocol (CDP) with native tab grouping and self-healing daemon.",
   "logo": "extension/icon128.png",
   "suggestedPrompts": [
