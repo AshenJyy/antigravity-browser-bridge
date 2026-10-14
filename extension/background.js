@@ -55,7 +55,7 @@ function connectWebSocket() {
         type: "client_hello",
         client: bInfo.name,
         browserVersion: bInfo.version,
-        version: "1.1.0"
+        version: chrome.runtime.getManifest().version
       }));
     };
 

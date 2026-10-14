@@ -30,8 +30,9 @@ WS_PORT = 9223
 HTTP_HOST = "127.0.0.1"
 HTTP_PORT = 9224
 
-active_ws: Optional[Any] = None
-client_info: Optional[Dict[str, Any]] = None
+connected_browsers: Dict[str, Dict[str, Any]] = {}
+tab_to_browser: Dict[int, str] = {}
+preferred_browser: str = "Microsoft Edge"
 pending_requests: Dict[int, asyncio.Future] = {}
 req_counter = 0
 
@@ -42,22 +43,30 @@ def get_next_id() -> int:
     return req_counter
 
 
-async def send_command(action: str, tab_id: Optional[int] = None, **kwargs) -> Dict[str, Any]:
-    global active_ws
-    if not active_ws:
-        return {
-            "success": False,
-            "error": "Browser extension is not connected. Please make sure Edge or Chrome is running with Antigravity Browser Bridge extension loaded."
-        }
+def get_target_ws(tab_id: Optional[int] = None, target_browser: Optional[str] = None) -> Optional[Any]:
+    if target_browser and target_browser in connected_browsers:
+        ws = connected_browsers[target_browser]["ws"]
+        if ws and not getattr(ws, "closed", False):
+            return ws
+    if tab_id is not None and tab_id in tab_to_browser:
+        b_name = tab_to_browser[tab_id]
+        if b_name in connected_browsers:
+            ws = connected_browsers[b_name]["ws"]
+            if ws and not getattr(ws, "closed", False):
+                return ws
+    for b_name in (preferred_browser, "Microsoft Edge", "Google Chrome"):
+        if b_name in connected_browsers:
+            ws = connected_browsers[b_name]["ws"]
+            if ws and not getattr(ws, "closed", False):
+                return ws
+    for b_name, b_data in connected_browsers.items():
+        ws = b_data["ws"]
+        if ws and not getattr(ws, "closed", False):
+            return ws
+    return None
 
-    # If tab_id is omitted, try to resolve the currently active tab first
-    if tab_id is None and action not in ("list_tabs", "get_active_tab", "create_tab"):
-        active_tab_res = await send_command("get_active_tab")
-        if active_tab_res.get("success") and active_tab_res.get("data"):
-            tab_id = active_tab_res["data"]["id"]
-        else:
-            return {"success": False, "error": "Could not determine active tab ID"}
 
+async def send_command_raw(ws: Any, action: str, tab_id: Optional[int] = None, **kwargs) -> Dict[str, Any]:
     req_id = get_next_id()
     loop = asyncio.get_running_loop()
     future = loop.create_future()
@@ -72,7 +81,7 @@ async def send_command(action: str, tab_id: Optional[int] = None, **kwargs) -> D
     }
 
     try:
-        await active_ws.send(json.dumps(payload))
+        await ws.send(json.dumps(payload))
         res = await asyncio.wait_for(future, timeout=20.0)
         return res
     except asyncio.TimeoutError:
@@ -83,10 +92,42 @@ async def send_command(action: str, tab_id: Optional[int] = None, **kwargs) -> D
         pending_requests.pop(req_id, None)
 
 
+async def send_command(action: str, tab_id: Optional[int] = None, target_browser: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+    if action == "list_tabs" and not target_browser:
+        if not connected_browsers:
+            return {"success": False, "error": "No browser extension is currently connected."}
+        all_tabs = []
+        for b_name, b_data in list(connected_browsers.items()):
+            b_ws = b_data["ws"]
+            if b_ws and not getattr(b_ws, "closed", False):
+                sub_res = await send_command_raw(b_ws, "list_tabs")
+                if sub_res.get("success") and isinstance(sub_res.get("data"), list):
+                    for tab in sub_res["data"]:
+                        tab["browser"] = b_name
+                        tab_to_browser[tab["id"]] = b_name
+                        all_tabs.append(tab)
+        return {"success": True, "data": all_tabs}
+
+    ws = get_target_ws(tab_id, target_browser)
+    if not ws:
+        return {
+            "success": False,
+            "error": "Browser extension is not connected. Please make sure Edge or Chrome is running with Antigravity Browser Bridge extension loaded."
+        }
+
+    if tab_id is None and action not in ("list_tabs", "get_active_tab", "create_tab"):
+        active_tab_res = await send_command_raw(ws, "get_active_tab")
+        if active_tab_res.get("success") and active_tab_res.get("data"):
+            tab_id = active_tab_res["data"]["id"]
+        else:
+            return {"success": False, "error": "Could not determine active tab ID"}
+
+    return await send_command_raw(ws, action, tab_id=tab_id, **kwargs)
+
+
 async def handle_ws(websocket):
-    global active_ws
-    print(f"[Bridge WS] Chrome extension connected from {websocket.remote_address}")
-    active_ws = websocket
+    current_browser = "Unknown Browser"
+    print(f"[Bridge WS] Extension connected from {websocket.remote_address}")
 
     try:
         async for message in websocket:
@@ -103,26 +144,29 @@ async def handle_ws(websocket):
                         if not future.done():
                             future.set_result(data)
                 elif msg_type == "cdp_event":
-                    # CDP event notification (console logs, network, etc.)
                     pass
                 elif msg_type == "tab_detached":
                     print(f"[Bridge WS] Tab {data.get('tabId')} detached: {data.get('reason')}")
                 elif msg_type == "client_hello":
-                    client_info = {
-                        "browser": data.get("client", "Unknown Browser"),
+                    current_browser = data.get("client", "Unknown Browser")
+                    c_info = {
+                        "browser": current_browser,
                         "browser_version": data.get("browserVersion", ""),
                         "version": data.get("version", "1.0.0")
                     }
-                    print(f"[Bridge WS] Client connected: {client_info['browser']} (v{client_info['browser_version']}, ext v{client_info['version']})")
+                    connected_browsers[current_browser] = {
+                        "ws": websocket,
+                        "info": c_info
+                    }
+                    print(f"[Bridge WS] Client registered: {c_info['browser']} (v{c_info['browser_version']}, ext v{c_info['version']})")
             except Exception as e:
                 print(f"[Bridge WS] Error parsing message: {e}")
     except Exception as e:
         print(f"[Bridge WS] Connection closed: {e}")
     finally:
-        if active_ws == websocket:
-            active_ws = None
-            client_info = None
-            print("[Bridge WS] Extension disconnected.")
+        if current_browser in connected_browsers and connected_browsers[current_browser]["ws"] == websocket:
+            del connected_browsers[current_browser]
+            print(f"[Bridge WS] {current_browser} disconnected.")
 
 
 async def handle_http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
@@ -178,8 +222,9 @@ async def handle_http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
         if method == "GET" and path == "/health":
             response_data = {
                 "ok": True,
-                "extension_connected": active_ws is not None,
-                "client": client_info if active_ws else None
+                "extension_connected": len(connected_browsers) > 0,
+                "browsers": [b["info"] for b in connected_browsers.values()],
+                "preferred": preferred_browser
             }
         elif method == "GET" and path == "/tabs":
             response_data = await send_command("list_tabs")

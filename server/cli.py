@@ -164,6 +164,12 @@ def main():
     # reload
     subparsers.add_parser("reload", help="Reload the Chrome/Edge extension")
 
+    # cdp
+    p_cdp = subparsers.add_parser("cdp", help="Send arbitrary Chrome DevTools Protocol (CDP) method")
+    p_cdp.add_argument("method", help="CDP method (e.g. Runtime.evaluate, Page.navigate)")
+    p_cdp.add_argument("params", nargs="?", default="{}", help="JSON params for CDP method")
+    p_cdp.add_argument("--tab", type=int, help="Target tab ID")
+
     # close
     p_close = subparsers.add_parser("close", help="Close a tab")
     p_close.add_argument("--tab", type=int, required=True, help="Tab ID to close")
@@ -175,12 +181,14 @@ def main():
         connected = res.get("extension_connected", False)
         print("Bridge Server:       🟢 Running")
         if connected:
-            client = res.get("client") or {}
-            b_name = client.get("browser", "Browser")
-            b_ver = client.get("browser_version", "")
-            ext_ver = client.get("version", "")
-            details = f"{b_name} {b_ver}".strip()
-            print(f"Browser Extension:   🟢 Connected ({details}, ext v{ext_ver})")
+            browsers = res.get("browsers", [])
+            pref = res.get("preferred", "")
+            if browsers:
+                b_desc = ", ".join([f"{b.get('browser')} (v{b.get('version')})" for b in browsers])
+                print(f"Connected Browsers:  🟢 {b_desc}")
+                print(f"Preferred Browser:   {pref}")
+            else:
+                print("Browser Extension:   🟢 Connected")
         else:
             print("Browser Extension:   🔴 Disconnected (Check Edge or Chrome)")
 
@@ -194,7 +202,11 @@ def main():
         for t in tabs:
             active_marker = " [*]" if t.get("active") else "    "
             attached_marker = " [Attached]" if t.get("attached") else ""
-            print(f"{active_marker} ID: {t.get('id'):<6} {t.get('title')[:40]:<42} ({t.get('url')[:60]}){attached_marker}")
+            b_name = t.get("browser", "")
+            b_tag = f"[{b_name.replace('Microsoft ', '').replace('Google ', '')}] " if b_name else ""
+            title = (t.get("title") or "")[:35]
+            url = (t.get("url") or "")[:55]
+            print(f"{active_marker} ID: {t.get('id'):<6} {b_tag}{title:<37} ({url}){attached_marker}")
 
     elif args.command == "active":
         res = api_request("/active_tab")
@@ -301,6 +313,20 @@ def main():
             print(f"Screenshot saved to: {res.get('saved_to', args.output)}")
         else:
             print(f"Screenshot Error: {res.get('error')}")
+
+    elif args.command == "cdp":
+        try:
+            params_dict = json.loads(args.params)
+        except Exception:
+            params_dict = {}
+        payload = {"method": args.method, "params": params_dict}
+        if args.tab:
+            payload["tabId"] = args.tab
+        res = api_request("/cdp", payload)
+        if res.get("success"):
+            print(json.dumps(res.get("data"), ensure_ascii=False, indent=2))
+        else:
+            print(f"CDP Error: {res.get('error')}")
 
     elif args.command == "close":
         res = api_request("/close_tab", {"tabId": args.tab})
