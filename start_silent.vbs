@@ -22,4 +22,7 @@ For i = 0 To UBound(candidates)
 Next
 If cmd = "" Then cmd = "pyw"
 
-WshShell.Run cmd & " server.py", 0, False
+Dim process, pid, cmdLine
+cmdLine = cmd & " """ & scriptDir & "\server\server.py"""
+Set process = GetObject("winmgmts:Win32_Process")
+process.Create cmdLine, scriptDir & "\server", Nothing, pid

@@ -50,6 +50,17 @@ def ensure_server_running():
         except Exception:
             pass
 
+    if not started and sys.platform == "win32":
+        try:
+            pyw_cand = Path(sys.executable).parent / "pythonw.exe"
+            exe_to_use = str(pyw_cand) if pyw_cand.exists() else "pythonw.exe"
+            ps_script = f"Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{CommandLine='{exe_to_use} \"{server_py}\"'}}"
+            res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True, timeout=5)
+            if res.returncode == 0 and b"ReturnValue 0" in res.stdout or b"0" in res.stdout:
+                started = True
+        except Exception:
+            pass
+
     if not started:
         candidates = []
         sibling_pyw = Path(sys.executable).parent / "pythonw.exe"
