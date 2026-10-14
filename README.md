@@ -1,4 +1,5 @@
 # Antigravity Browser Bridge
+not available in Google Web Store, im not gonna pay that $5
 
 [English](#english) · [简体中文](#chinese)
 
