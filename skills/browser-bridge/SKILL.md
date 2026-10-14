@@ -16,12 +16,13 @@ The Antigravity Browser Bridge connects Antigravity directly to the user's runni
 
 ---
 
-## ⚡ Self-Healing Daemon
+## Self-Healing Daemon
+
 The CLI tool `cli.py` has automatic self-healing built-in. If the server daemon is not active, running any `cli.py` command will automatically launch the daemon in the background (`pythonw server.py`) without requiring manual setup.
 
 ---
 
-## 🛠️ Common Operations & Recipes
+## Common Operations & Recipes
 
 ### 1. Check Connection Status & List Tabs
 ```powershell
@@ -38,7 +39,7 @@ py server/cli.py tabs
 py server/cli.py open "https://github.com"
 
 # Or navigate an existing tab:
-py server/cli.py navigate <tabId> "https://news.ycombinator.com"
+py server/cli.py open "https://news.ycombinator.com" --tab <tabId>
 ```
 
 ### 3. Interactive Webpage Navigation (Snapshot & Click / Type)
@@ -56,8 +57,8 @@ py server/cli.py type <tabId> "#search-input" "deep learning"
 
 ### 4. Page Content Extraction & Screenshots
 ```powershell
-# Extract text content and HTML
-py server/cli.py content <tabId>
+# Extract plain text content from page
+py server/cli.py text <tabId>
 
 # Take screenshot of page
 py server/cli.py screenshot <tabId> -o "page_shot.png"
