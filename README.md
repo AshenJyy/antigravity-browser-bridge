@@ -139,6 +139,12 @@ Once installed, the AI assistant will automatically recognize the `browser-bridg
 
 ---
 
+## 📝 Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for full release notes and version history.
+
+---
+
 ## 📄 License
 
 This project is open-source software licensed under the [Apache License 2.0](LICENSE).
