@@ -5,6 +5,7 @@ let socket = null;
 let isConnected = false;
 let reconnectTimer = null;
 const attachedTabs = new Set();
+const agentOpenedTabs = new Set();
 
 console.log("[Antigravity Bridge] Service Worker initializing...");
 
@@ -41,7 +42,7 @@ function connectWebSocket() {
   try {
     socket = new WebSocket(WS_URL);
 
-    socket.onopen = () => {
+    socket.onopen = async () => {
       console.log("[Antigravity Bridge] Connected to local server:", WS_URL);
       isConnected = true;
       if (reconnectTimer) {
@@ -57,6 +58,7 @@ function connectWebSocket() {
         browserVersion: bInfo.version,
         version: chrome.runtime.getManifest().version
       }));
+      await checkAndCleanupGeminiGroup();
     };
 
     socket.onmessage = async (event) => {
@@ -169,6 +171,7 @@ async function addTabToGeminiGroup(tabId) {
     const tab = await chrome.tabs.get(tabId);
     if (!tab) return null;
     const windowId = tab.windowId;
+    agentOpenedTabs.add(tabId);
 
     const groups = await chrome.tabGroups.query({ windowId });
     const existingGroup = groups.find(g => g.title === "Gemini");
@@ -192,11 +195,33 @@ async function addTabToGeminiGroup(tabId) {
   }
 }
 
+// Helper: Close/disband Gemini group when no agent-opened tabs exist
+async function checkAndCleanupGeminiGroup(windowId = null) {
+  try {
+    const queryParam = windowId ? { windowId } : {};
+    const groups = await chrome.tabGroups.query(queryParam);
+    for (const group of groups) {
+      if (group.title === "Gemini") {
+        const tabsInGroup = await chrome.tabs.query({ groupId: group.id });
+        const agentTabs = tabsInGroup.filter(t => agentOpenedTabs.has(t.id));
+        // If there are NO agent-opened tabs in this group, disband/close it by ungrouping remaining tabs
+        if (agentTabs.length === 0 && tabsInGroup.length > 0) {
+          await chrome.tabs.ungroup(tabsInGroup.map(t => t.id));
+          console.log(`[Antigravity Bridge] Disbanded Gemini group ${group.id} (no agent tabs remaining).`);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[Antigravity Bridge] checkAndCleanupGeminiGroup error:", err);
+  }
+}
+
 // Official Google Gemini gradient star vector icon
 const GEMINI_SVG_DATA = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'><stop offset='0%25' stop-color='%234285F4'/><stop offset='35%25' stop-color='%239B72CB'/><stop offset='70%25' stop-color='%23D96570'/><stop offset='100%25' stop-color='%23FFA439'/></linearGradient></defs><path d='M16 1 C16 9.28 9.28 16 1 16 C9.28 16 16 22.72 16 31 C16 22.72 22.72 16 31 16 C22.72 16 16 9.28 16 1 Z' fill='url(%23g)'/></svg>";
 
-// Set crisp official Gemini Logo as Favicon
+// Set crisp official Gemini Logo as Favicon (ONLY for tabs opened by agent)
 async function setTabGeminiLogo(tabId) {
+  if (!agentOpenedTabs.has(tabId)) return;
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
@@ -215,9 +240,9 @@ async function setTabGeminiLogo(tabId) {
   } catch (_) {}
 }
 
-// Auto-maintain Gemini Logo on grouped tabs
+// Auto-maintain Gemini Logo on grouped tabs ONLY if opened by agent
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (changeInfo.status === "complete" && tab.groupId && tab.groupId !== -1) {
+  if (changeInfo.status === "complete" && tab.groupId && tab.groupId !== -1 && agentOpenedTabs.has(tabId)) {
     try {
       const group = await chrome.tabGroups.get(tab.groupId);
       if (group && group.title === "Gemini") {
@@ -236,14 +261,30 @@ async function handleCommand(msg) {
       case "group":
       case "tag": {
         if (!tabId) return { success: false, error: "tabId required" };
+        agentOpenedTabs.add(tabId);
         await cleanupGeminiOverlay(tabId);
         const gId = await addTabToGeminiGroup(tabId);
-        await tagTabTitleWithPointer(tabId);
-        return { success: true, message: `Tab added to Gemini group (${gId}) with 🖱️ pointer` };
+        return { success: true, message: `Tab ${tabId} added to Gemini group (${gId})` };
+      }
+
+      case "ungroup": {
+        if (tabId) {
+          try { await chrome.tabs.ungroup(tabId); } catch (_) {}
+          agentOpenedTabs.delete(tabId);
+        } else {
+          agentOpenedTabs.clear();
+        }
+        await checkAndCleanupGeminiGroup();
+        return { success: true, message: "Ungrouped tabs and cleaned up Gemini group." };
       }
 
       case "list_tabs": {
         const tabs = await chrome.tabs.query({});
+        let groupMap = new Map();
+        try {
+          const groups = await chrome.tabGroups.query({});
+          groupMap = new Map(groups.map(g => [g.id, g.title]));
+        } catch (_) {}
         return {
           success: true,
           data: tabs.map(t => ({
@@ -252,6 +293,9 @@ async function handleCommand(msg) {
             title: t.title,
             url: t.url,
             active: t.active,
+            groupId: t.groupId,
+            groupTitle: groupMap.get(t.groupId) || null,
+            isAgentTab: agentOpenedTabs.has(t.id),
             attached: attachedTabs.has(t.id)
           }))
         };
@@ -275,7 +319,7 @@ async function handleCommand(msg) {
         if (!tabId) return { success: false, error: "tabId is required" };
         await ensureDebuggerAttached(tabId);
         await cleanupGeminiOverlay(tabId);
-        await addTabToGeminiGroup(tabId);
+        // Do NOT add existing tabs to Gemini group on attach
         return { success: true, message: `Attached to tab ${tabId}` };
       }
 
@@ -291,20 +335,25 @@ async function handleCommand(msg) {
       case "navigate": {
         if (!tabId || !msg.url) return { success: false, error: "tabId and url required" };
         const updated = await chrome.tabs.update(tabId, { url: msg.url });
-        await addTabToGeminiGroup(tabId);
+        // Do NOT add existing tabs to Gemini group on navigate
         return { success: true, data: { id: updated.id, url: updated.url } };
       }
 
       case "create_tab": {
         const newTab = await chrome.tabs.create({ url: msg.url || "about:blank", active: msg.active !== false });
+        agentOpenedTabs.add(newTab.id);
         await addTabToGeminiGroup(newTab.id);
         return { success: true, data: { id: newTab.id, url: newTab.url } };
       }
 
       case "close_tab": {
         if (!tabId) return { success: false, error: "tabId required" };
-        await chrome.tabs.remove(tabId);
+        agentOpenedTabs.delete(tabId);
         attachedTabs.delete(tabId);
+        try {
+          await chrome.tabs.remove(tabId);
+        } catch (_) {}
+        await checkAndCleanupGeminiGroup();
         return { success: true, message: `Closed tab ${tabId}` };
       }
 
@@ -591,5 +640,15 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
   return true;
 });
 
-// Start connection on launch
+// Automatically clean up when tabs are closed
+chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
+  attachedTabs.delete(tabId);
+  if (agentOpenedTabs.has(tabId)) {
+    agentOpenedTabs.delete(tabId);
+  }
+  await checkAndCleanupGeminiGroup(removeInfo?.windowId);
+});
+
+// Start connection on launch and clean up any orphaned groups
+checkAndCleanupGeminiGroup();
 connectWebSocket();

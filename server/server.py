@@ -234,6 +234,8 @@ async def handle_http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
             response_data = await send_command("snapshot", tab_id=body_json.get("tabId"))
         elif path in ("/group", "/tag"):
             response_data = await send_command("group", tab_id=body_json.get("tabId"))
+        elif path in ("/ungroup", "/close_group"):
+            response_data = await send_command("ungroup", tab_id=body_json.get("tabId"))
         elif method == "POST" and path == "/reload":
             response_data = await send_command("reload_ext")
         elif method == "POST" and path == "/attach":

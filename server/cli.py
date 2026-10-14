@@ -174,6 +174,10 @@ def main():
     p_close = subparsers.add_parser("close", help="Close a tab")
     p_close.add_argument("--tab", type=int, required=True, help="Tab ID to close")
 
+    # ungroup
+    p_ungroup = subparsers.add_parser("ungroup", help="Disband Gemini tab group or ungroup tab")
+    p_ungroup.add_argument("--tab", type=int, help="Target tab ID (optional)")
+
     args = parser.parse_args()
 
     if args.command == "status":
@@ -204,9 +208,10 @@ def main():
             attached_marker = " [Attached]" if t.get("attached") else ""
             b_name = t.get("browser", "")
             b_tag = f"[{b_name.replace('Microsoft ', '').replace('Google ', '')}] " if b_name else ""
+            g_tag = f"[{t.get('groupTitle')}] " if t.get("groupTitle") else ""
             title = (t.get("title") or "")[:35]
             url = (t.get("url") or "")[:55]
-            print(f"{active_marker} ID: {t.get('id'):<6} {b_tag}{title:<37} ({url}){attached_marker}")
+            print(f"{active_marker} ID: {t.get('id'):<6} {b_tag}{g_tag}{title:<37} ({url}){attached_marker}")
 
     elif args.command == "active":
         res = api_request("/active_tab")
@@ -261,6 +266,16 @@ def main():
             print("Tab added to native browser [Gemini] Tab Group! 🗂️")
         else:
             print(f"Group Error: {res.get('error')}")
+
+    elif args.command == "ungroup":
+        payload = {}
+        if args.tab:
+            payload["tabId"] = args.tab
+        res = api_request("/ungroup", payload)
+        if res.get("success"):
+            print("Tab ungrouped / Gemini group disbanded.")
+        else:
+            print(f"Ungroup Error: {res.get('error')}")
 
     elif args.command == "eval":
         payload = {"expression": args.code}

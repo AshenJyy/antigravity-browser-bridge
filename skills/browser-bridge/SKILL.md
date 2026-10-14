@@ -75,3 +75,12 @@ py server/cli.py eval <tabId> "window.scrollY"
 py server/cli.py cdp <tabId> Page.captureScreenshot '{"format":"png"}'
 py server/cli.py cdp <tabId> DOM.getDocument '{"depth":1}'
 ```
+
+### 7. Close Tabs or Disband Gemini Group
+```powershell
+# Close a specific tab (the [Gemini] group closes automatically when all agent tabs close)
+py server/cli.py close --tab <tabId>
+
+# Explicitly disband the [Gemini] group and ungroup tabs
+py server/cli.py ungroup
+```

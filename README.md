@@ -26,7 +26,7 @@ Traditional browser automation tools (e.g., standard Playwright or Puppeteer) la
 
 **Antigravity Browser Bridge** operates inside your existing browser:
 - **Preserved Sessions**: Interacts directly with sites you are already signed into.
-- **Native Tab Grouping**: AI-controlled tabs are grouped into a labeled `[Gemini]` tab group with the Gemini icon.
+- **Native Tab Grouping**: AI-opened tabs are automatically organized into a labeled `[Gemini]` tab group; the group disbands and closes as soon as all agent tabs are closed, never affecting your existing tabs.
 - **Local-Only Communication**: Extension connects via `ws://127.0.0.1:9223`; HTTP API runs on `http://127.0.0.1:9224`. No cloud relay.
 - **Self-Healing Daemon**: The CLI automatically boots the background service if it is not already running.
 
@@ -84,6 +84,7 @@ The CLI utility (`server/cli.py`) lets you inspect and control the browser from 
 | `eval` | `py server/cli.py eval <tabId> <expression>` | Executes arbitrary JavaScript in the page context. |
 | `cdp` | `py server/cli.py cdp <tabId> <method> [params_json]` | Executes a raw Chrome DevTools Protocol command. |
 | `group` / `tag` | `py server/cli.py group [tabId]` | Manually adds an existing tab to the `[Gemini]` tab group. |
+| `ungroup` | `py server/cli.py ungroup [--tab <tabId>]` | Disbands the `[Gemini]` tab group or ungroups specified tab. |
 | `close` | `py server/cli.py close <tabId>` | Closes the specified browser tab. |
 
 ### HTTP REST API
@@ -105,6 +106,7 @@ The local server exposes HTTP endpoints at `http://127.0.0.1:9224`:
 | `POST` | `/eval` | `{"tabId": 123, "expression": "document.title"}` | Evaluates JavaScript in the page context. |
 | `POST` | `/cdp` | `{"tabId": 123, "method": "...", "params": {...}}` | Dispatches raw CDP command. |
 | `POST` | `/group` | `{"tabId": 123}` | Adds tab to the `[Gemini]` group. |
+| `POST` | `/ungroup` | `{"tabId": 123}` (optional) | Disbands the `[Gemini]` group or ungroups tab. |
 | `POST` | `/close_tab`| `{"tabId": 123}` | Closes a tab. |
 
 ### Antigravity Plugin Integration
@@ -147,7 +149,7 @@ Antigravity Browser Bridge 允许 AI Agent 和自动化脚本通过 Chrome DevTo
 
 **Antigravity Browser Bridge** 采用直通真实浏览器的方案：
 - **复用真实登录态**：直接在已登录账号的日常浏览器中操作，无缝访问内网系统与需要登录的网站。
-- **原生标签页组收纳**：受控标签页自动归入带有 Gemini 图标的紫色 `[Gemini]` 标签页组，与日常标签页井井有条地共存。
+- **原生标签页组收纳**：仅由 AI 新建的标签页会自动归入紫色的 `[Gemini]` 标签页组；当 AI 开启的标签页全部关闭时，标签组自动解散退出，绝不干扰用户原有的日常标签页。
 - **纯本地通信**：扩展通过 `ws://127.0.0.1:9223` 连接本地 Python 服务，Agent / CLI 通过 `http://127.0.0.1:9224` 发送指令，无任何云端中继。
 - **后台服务自愈**：CLI 工具在检测到服务离线时会自动在后台拉起，无需人工每次手动常驻。
 
@@ -205,6 +207,7 @@ flowchart LR
 | `eval` | `py server/cli.py eval <tabId> <expression>` | 在网页上下文执行 JavaScript 表达式。 |
 | `cdp` | `py server/cli.py cdp <tabId> <method> [params_json]` | 发送原生 Chrome DevTools Protocol (CDP) 指令。 |
 | `group` / `tag` | `py server/cli.py group [tabId]` | 手动将已有标签页归入 `[Gemini]` 标签组。 |
+| `ungroup` | `py server/cli.py ungroup [--tab <tabId>]` | 解散 `[Gemini]` 标签组或移出指定标签页。 |
 | `close` | `py server/cli.py close <tabId>` | 关闭指定的浏览器标签页。 |
 
 ### HTTP REST API 接口清单
@@ -226,6 +229,7 @@ flowchart LR
 | `POST` | `/eval` | `{"tabId": 123, "expression": "document.title"}` | 在页面中执行 JavaScript 脚本。 |
 | `POST` | `/cdp` | `{"tabId": 123, "method": "...", "params": {...}}` | 执行原生 CDP 指令。 |
 | `POST` | `/group` | `{"tabId": 123}` | 将标签页加入 `[Gemini]` 标签组。 |
+| `POST` | `/ungroup` | `{"tabId": 123}` (可选) | 解散 `[Gemini]` 标签组或移出标签页。 |
 | `POST` | `/close_tab`| `{"tabId": 123}` | 关闭标签页。 |
 
 ### Antigravity 插件集成
