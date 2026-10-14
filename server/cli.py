@@ -36,19 +36,42 @@ def ensure_server_running():
     print("[Bridge CLI] Server not active, auto-starting background daemon...")
     server_dir = Path(__file__).resolve().parent
     server_py = server_dir / "server.py"
-    
-    DETACHED = 0x00000008 | 0x08000000
-    for cmd in ["pythonw", "py", "python"]:
+    vbs_path = server_dir.parent / "start_silent.vbs"
+
+    started = False
+    if sys.platform == "win32" and vbs_path.exists():
         try:
             subprocess.Popen(
-                [cmd, str(server_py)],
+                ["wscript.exe", str(vbs_path)],
                 cwd=str(server_dir),
-                creationflags=DETACHED if sys.platform == "win32" else 0,
                 close_fds=True
             )
-            break
+            started = True
         except Exception:
-            continue
+            pass
+
+    if not started:
+        candidates = []
+        sibling_pyw = Path(sys.executable).parent / "pythonw.exe"
+        if sibling_pyw.exists():
+            candidates.append(str(sibling_pyw))
+        candidates.extend(["pyw", "pythonw", "py", sys.executable])
+
+        DETACHED = 0x00000008 | 0x08000000
+        for cmd in candidates:
+            try:
+                subprocess.Popen(
+                    [cmd, str(server_py)],
+                    cwd=str(server_dir),
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=DETACHED if sys.platform == "win32" else 0,
+                    close_fds=True
+                )
+                break
+            except Exception:
+                continue
 
     for _ in range(10):
         time.sleep(0.3)
