@@ -1,19 +1,21 @@
 {
   "manifest_version": 3,
-  "name": "Antigravity Browser Bridge",
-  "version": "1.4.1",
-  "description": "Enables Antigravity AI assistant to inspect and control active browser tabs directly via CDP in Microsoft Edge and Google Chrome.",
+  "name": "Browser Bridge",
+  "version": "2.0.0",
+  "minimum_chrome_version": "125",
+  "description": "Connect DSH and Antigravity to your existing Microsoft Edge tabs through an authenticated local bridge.",
   "permissions": [
     "tabGroups",
     "debugger",
     "tabs",
     "activeTab",
-    "scripting",
     "storage",
-    "alarms"
+    "alarms",
+    "downloads"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "http://*/*",
+    "https://*/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -21,7 +23,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Antigravity Browser Bridge"
+    "default_title": "Browser Bridge"
   },
   "icons": {
     "16": "icon16.png",

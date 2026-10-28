@@ -1,250 +1,60 @@
-# Antigravity Browser Bridge
-not available in Google Web Store, im not gonna pay that $5
+# Browser Bridge
 
-[English](#english) · [简体中文](#chinese)
+让 **DeepSeek Harness Desktop v0.2.1-rc.3、Antigravity App 和 `agy` 子代理**使用同一套 Microsoft Edge 浏览器操控能力。基于原 Antigravity Browser Bridge 重构；保留 Apache-2.0 许可和原项目来源，不包含 IDE 适配。
 
----
+**v2.0.0 发布状态：已实现并打包，尚未运行自动化测试或双宿主端到端验收。**
 
-<a id="english"></a>
+## 安装
+
+下载 [v2.0.0 发布包](https://github.com/AshenJyy/antigravity-browser-bridge/releases/tag/v2.0.0)，完整步骤见 [中文安装说明](docs/INSTALL.zh-CN.md)。
+
+- DSH：下载 [dsh-browser-bridge-2.0.0.tgz](https://github.com/AshenJyy/antigravity-browser-bridge/releases/download/v2.0.0/dsh-browser-bridge-2.0.0.tgz)，在插件管理中添加本地包，使用官方 `dsh.bundle.patch` / Cordis 插件格式。
+- Antigravity App / agy：下载并解压 [browser-bridge-antigravity-2.0.0.zip](https://github.com/AshenJyy/antigravity-browser-bridge/releases/download/v2.0.0/browser-bridge-antigravity-2.0.0.zip)，运行 `scripts/Install-Antigravity.ps1`。脚本先查看 agy 的插件注册信息；若已发现同一全局目录，直接启用，否则执行安装。DSH 原生工具不会自动传给外部 agy 子进程。
+- Edge：在 `edge://extensions` 加载 `extension/`，运行 `scripts/BrowserBridge.ps1 pair`，在扩展弹窗填写本地配对 token。
+
+发布 ZIP 自带打包后的 JavaScript 运行文件，无需额外安装 Python 或 npm 依赖。需要 Node.js 22+；Windows 脚本可使用 DSH 自带 Node 运行时。源码开发使用 Node.js 与 npm/pnpm。
+
+## 能力
+
+27 个统一 `browser_*` 工具覆盖标签页管理、正文与结构化快照、指定标签截图、DOM/坐标点击、悬停、输入、按键、滚动、下拉选择、导航、等待、上传、下载与对话框。DSH 通过官方多模态附件适配返回截图；Antigravity 通过标准 MCP image block 返回。
+
+- 复用真实 Edge 的登录状态，以扩展持久实例 ID 区分多个配置。
+- 标签句柄包含实例身份，操作前须新建或明确接管；无活动页隐式回退。
+- DSH 按 Agent/Session、Antigravity 按 MCP 进程隔离；共享 MCP 进程的聊天不自动获得独立身份。
+- 按任务显示标签组，关闭/释放均有明确动作；释放不会关闭用户页面。
+- 本地 token 配对、HTTP/WS 来源检查、串行执行、断线重连及不重放副作用的错误处理。
+
+浏览器内部页、原生系统窗口、封闭组件等受浏览器接口限制。截图需要宿主模型支持图像。工具结果会交给宿主模型，不能宣称“网页内容绝不离开本机”。详细范围及未验收项见安装说明。
+
+## 架构
+
+```mermaid
+flowchart LR
+  D[DSH native tools] --> B[Shared Node bridge]
+  A[Antigravity App] --> M[MCP stdio adapter]
+  G[DSH subagent: agy] --> M
+  M --> B
+  C[CLI] --> B
+  B <-->|Authenticated WebSocket| E[Edge MV3 extension]
+  E --> T[Real browser tabs]
+```
+
+默认监听 `127.0.0.1:9224`，按需后台启动。状态与 token 默认放在 `%LOCALAPPDATA%\BrowserBridge`；`BROWSER_BRIDGE_PORT`、`BROWSER_BRIDGE_DATA_DIR` 可配置。双方必须使用同样的设置。
+
+协议见 [PROTOCOL.md](docs/PROTOCOL.md)，Agent 操作说明见 [SKILL.md](skills/browser-bridge/SKILL.md)。v1 HTTP 路由和数字标签 ID 已退役；旧 Python 入口只转发至 Node，新 CLI 参数见 `--help`。
+
+## 构建
+
+```powershell
+pnpm install --frozen-lockfile
+node scripts/build.mjs
+py scripts/package_release.py --output work/releases
+```
+
+构建生成独立 runtime；打包生成 npm-compatible DSH `.tgz` 和 Antigravity `.zip`，不安装、不启动宿主、不调用模型。仓库包含开发测试文件，但 v2.0.0 发布流程未执行这些测试。
 
 ## English
 
-A local browser automation bridge for Microsoft Edge and Google Chrome.
+Browser Bridge gives DSH Desktop 0.2.1-rc.3, Antigravity App, and the `agy` CLI used by DSH subagents a shared interface to the user's real Edge profile. It ships a native DSH bundle, a stdio MCP adapter, and an authenticated MV3 extension. Select or claim explicit tab handles; no command silently acts on the active page. Screenshots are actual image tool results. Version 2.0.0 is implemented and packaged, but automated tests and end-to-end host acceptance have not been run. Download the packages from the [v2.0.0 release](https://github.com/AshenJyy/antigravity-browser-bridge/releases/tag/v2.0.0).
 
-Antigravity Browser Bridge allows AI agents and scripts to control your everyday, logged-in browser via the Chrome DevTools Protocol (CDP). Controlled pages run directly inside your existing browser profile and are automatically organized into a native purple `[Gemini]` tab group.
-
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Manifest](https://img.shields.io/badge/Manifest-MV3-purple.svg)](extension/manifest.json)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-green.svg)](server/server.py)
-[![Antigravity](https://img.shields.io/badge/Antigravity-Plugin%20Compatible-orange.svg)](plugin.json)
-
-### Why Browser Bridge?
-
-Traditional browser automation tools (e.g., standard Playwright or Puppeteer) launch clean, isolated headless instances. While suitable for CI, this creates friction for daily workflows:
-- **No Stored Sessions**: You lose saved cookies, active logins, bookmarks, and browser extensions.
-- **Bot Detection**: Automated fresh browsers frequently trigger Cloudflare challenges and CAPTCHAs.
-- **Disconnected Window**: Actions occur in an invisible or separate window away from your active work.
-
-**Antigravity Browser Bridge** operates inside your existing browser:
-- **Preserved Sessions**: Interacts directly with sites you are already signed into.
-- **Native Tab Grouping**: AI-opened tabs are automatically organized into a labeled `[Gemini]` tab group; the group disbands and closes as soon as all agent tabs are closed, never affecting your existing tabs.
-- **Local-Only Communication**: Extension connects via `ws://127.0.0.1:9223`; HTTP API runs on `http://127.0.0.1:9224`. No cloud relay.
-- **Self-Healing Daemon**: The CLI automatically boots the background service if it is not already running.
-
-### Architecture
-
-```mermaid
-flowchart LR
-    A["AI Agent / CLI"] <-->|"HTTP :9224"| B["Python Server (server.py)"]
-    B <-->|"WebSocket :9223"| C["Browser Extension (MV3)"]
-    C <-->|"Chrome Debugger API (CDP)"| D["Active Browser Tabs ([Gemini] Group)"]
-```
-
-### Quickstart
-
-#### 1. Requirements
-- Python 3.10+
-- Microsoft Edge or Google Chrome
-- Install Python dependencies:
-  ```bash
-  pip install -r server/requirements.txt
-  ```
-
-#### 2. Load the Extension
-1. Open your browser extensions page:
-   - Microsoft Edge: `edge://extensions/`
-   - Google Chrome: `chrome://extensions/`
-2. Turn on **Developer mode**.
-3. Click **Load unpacked** and select the `extension/` directory of this repo.
-4. The extension icon will show `OFF` until the server is running.
-
-#### 3. Start the Server
-- **Foreground**:
-  ```powershell
-  python server/server.py
-  ```
-- **Silent Background Daemon (Windows)**:
-  Double-click `start_silent.vbs` or run `start_server.bat`.
-
-Once the server connects, the extension badge switches to `ON` (green).
-
-### CLI Reference
-
-The CLI utility (`server/cli.py`) lets you inspect and control the browser from terminal scripts or AI agent tool calls:
-
-| Command | Usage | Description |
-|---|---|---|
-| `status` | `py server/cli.py status` | Checks server health and connected browser instances. |
-| `tabs` | `py server/cli.py tabs` | Lists all open tabs across connected browsers. |
-| `open` | `py server/cli.py open <url>` | Opens a URL in a new tab inside the `[Gemini]` group. |
-| `snapshot` | `py server/cli.py snapshot [tabId]` | Captures an indexed list of interactive DOM elements. |
-| `click` | `py server/cli.py click <tabId> <target>` | Clicks an element by index (`"#1"`), selector, or visible text. |
-| `type` | `py server/cli.py type <tabId> <selector> <text>` | Enters text into an input or textarea element. |
-| `text` | `py server/cli.py text [tabId]` | Extracts plain text content from the current page. |
-| `screenshot` | `py server/cli.py screenshot [tabId] -o <path>` | Takes a screenshot and saves it to a file. |
-| `eval` | `py server/cli.py eval <tabId> <expression>` | Executes arbitrary JavaScript in the page context. |
-| `cdp` | `py server/cli.py cdp <tabId> <method> [params_json]` | Executes a raw Chrome DevTools Protocol command. |
-| `group` / `tag` | `py server/cli.py group [tabId]` | Manually adds an existing tab to the `[Gemini]` tab group. |
-| `ungroup` | `py server/cli.py ungroup [--tab <tabId>]` | Disbands the `[Gemini]` tab group or ungroups specified tab. |
-| `close` | `py server/cli.py close <tabId>` | Closes the specified browser tab. |
-
-### HTTP REST API
-
-The local server exposes HTTP endpoints at `http://127.0.0.1:9224`:
-
-| Method | Endpoint | Payload | Description |
-|---|---|---|---|
-| `GET` | `/health` | None | Returns server status and connected browser details. |
-| `GET` | `/tabs` | None | Lists all tabs across connected browsers. |
-| `GET` | `/active_tab` | None | Retrieves the currently active tab ID and URL. |
-| `POST` | `/new_tab` | `{"url": "...", "active": true}` | Opens a new tab in the `[Gemini]` tab group. |
-| `POST` | `/navigate` | `{"tabId": 123, "url": "..."}` | Navigates an existing tab to a target URL. |
-| `POST` | `/snap` | `{"tabId": 123}` | Returns structured interactive elements with assigned IDs. |
-| `POST` | `/click` | `{"tabId": 123, "selector": "#btn"}` | Clicks element by indexed reference or CSS selector. |
-| `POST` | `/type` | `{"tabId": 123, "selector": "#kw", "text": "...", "clear": true}` | Types text into an element. |
-| `POST` | `/content` | `{"tabId": 123}` | Extracts page title, URL, and readable body text. |
-| `POST` | `/screenshot`| `{"tabId": 123, "output": "page.png"}` | Captures viewport screenshot (returns base64 or saves to file). |
-| `POST` | `/eval` | `{"tabId": 123, "expression": "document.title"}` | Evaluates JavaScript in the page context. |
-| `POST` | `/cdp` | `{"tabId": 123, "method": "...", "params": {...}}` | Dispatches raw CDP command. |
-| `POST` | `/group` | `{"tabId": 123}` | Adds tab to the `[Gemini]` group. |
-| `POST` | `/ungroup` | `{"tabId": 123}` (optional) | Disbands the `[Gemini]` group or ungroups tab. |
-| `POST` | `/close_tab`| `{"tabId": 123}` | Closes a tab. |
-
-### Antigravity Plugin Integration
-
-To use this project as an Antigravity plugin:
-- Copy or link this repository to `~/.gemini/config/plugins/browser-bridge` (global) or `.agents/plugins/browser-bridge` (workspace).
-- The embedded skill definition (`skills/browser-bridge/SKILL.md`) is automatically recognized by Antigravity agents.
-
-### Privacy & Security
-
-- **Localhost Only**: Both WebSocket (`9223`) and HTTP (`9224`) servers bind exclusively to `127.0.0.1`.
-- **Zero Cloud Relay**: Page contents, DOM trees, and screenshots never leave your local machine.
-- **Visual Indication**: Chromium displays its standard debugger banner whenever an automation session attaches to a tab.
-
-### License
-
-Apache License 2.0.
-
----
-
-<a id="chinese"></a>
-
-## 简体中文
-
-专为 Microsoft Edge 与 Google Chrome 设计的本地浏览器控制桥接工具。
-
-Antigravity Browser Bridge 允许 AI Agent 和自动化脚本通过 Chrome DevTools Protocol (CDP) 直接控制你日常使用的真实浏览器。受控标签页直接复用当前浏览器的登录态与配置，并自动整理到原生的紫色 `[Gemini]` 标签页组中。
-
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Manifest](https://img.shields.io/badge/Manifest-MV3-purple.svg)](extension/manifest.json)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-green.svg)](server/server.py)
-[![Antigravity](https://img.shields.io/badge/Antigravity-Plugin%20Compatible-orange.svg)](plugin.json)
-
-### 为什么选择 Browser Bridge？
-
-传统的浏览器自动化工具（如独立的 Playwright / Puppeteer）通常启动全新、隔离的无头浏览器。这在自动化测试时很有用，但在日常个人开发与辅助场景下存在明显短板：
-- **丢失用户会话**：无法复用日常浏览器的 Cookie、登录态、收藏夹与扩展。
-- **易被反爬拦截**：无状态的新浏览器极易触发 Cloudflare 验证码与人机检测。
-- **与工作流脱节**：操作在隐蔽或独立的窗口中进行，无法直观查看和介入。
-
-**Antigravity Browser Bridge** 采用直通真实浏览器的方案：
-- **复用真实登录态**：直接在已登录账号的日常浏览器中操作，无缝访问内网系统与需要登录的网站。
-- **原生标签页组收纳**：仅由 AI 新建的标签页会自动归入紫色的 `[Gemini]` 标签页组；当 AI 开启的标签页全部关闭时，标签组自动解散退出，绝不干扰用户原有的日常标签页。
-- **纯本地通信**：扩展通过 `ws://127.0.0.1:9223` 连接本地 Python 服务，Agent / CLI 通过 `http://127.0.0.1:9224` 发送指令，无任何云端中继。
-- **后台服务自愈**：CLI 工具在检测到服务离线时会自动在后台拉起，无需人工每次手动常驻。
-
-### 架构设计
-
-```mermaid
-flowchart LR
-    A["AI Agent / CLI 终端"] <-->|"HTTP :9224"| B["本地 Python 服务 (server.py)"]
-    B <-->|"WebSocket :9223"| C["浏览器扩展 (MV3)"]
-    C <-->|"Chrome Debugger API (CDP)"| D["活动标签页 ([Gemini] 标签组)"]
-```
-
-### 快速开始
-
-#### 1. 环境准备
-- Python 3.10 及以上
-- Microsoft Edge 或 Google Chrome
-- 安装依赖：
-  ```bash
-  pip install -r server/requirements.txt
-  ```
-
-#### 2. 安装浏览器扩展
-1. 打开浏览器扩展管理页面：
-   - Microsoft Edge：`edge://extensions/`
-   - Google Chrome：`chrome://extensions/`
-2. 开启 **开发者模式**（Edge 在左下角，Chrome 在右上角）。
-3. 点击 **加载解压缩的扩展**，选择本项目中的 `extension/` 目录。
-4. 未启动本地服务前，扩展图标角标会显示 `OFF`。
-
-#### 3. 启动本地服务
-- **前台控制台运行**：
-  ```powershell
-  python server/server.py
-  ```
-- **后台静默运行（Windows）**：
-  双击 `start_silent.vbs` 或运行 `start_server.bat`。
-
-服务连接成功后，浏览器扩展角标会自动切换为绿色 `ON`。
-
-### CLI 命令行速查
-
-通过 `server/cli.py` 可以在终端或 Agent 脚本中直接控制浏览器：
-
-| 命令 | 示例 | 功能说明 |
-|---|---|---|
-| `status` | `py server/cli.py status` | 查看服务健康状态与当前已连接的浏览器实例。 |
-| `tabs` | `py server/cli.py tabs` | 列出所有已连接浏览器中的打开标签页。 |
-| `open` | `py server/cli.py open <url>` | 在 `[Gemini]` 标签组中打开新网页。 |
-| `snapshot` | `py server/cli.py snapshot [tabId]` | 提取页面中带编号的可交互元素快照。 |
-| `click` | `py server/cli.py click <tabId> <target>` | 通过编号（如 `"#1"`）、选择器或可见文本点击元素。 |
-| `type` | `py server/cli.py type <tabId> <selector> <text>` | 在指定的输入框中键入文本。 |
-| `text` | `py server/cli.py text [tabId]` | 提取当前页面的纯文本正文内容。 |
-| `screenshot` | `py server/cli.py screenshot [tabId] -o <path>` | 截取网页屏幕截图并保存至指定路径。 |
-| `eval` | `py server/cli.py eval <tabId> <expression>` | 在网页上下文执行 JavaScript 表达式。 |
-| `cdp` | `py server/cli.py cdp <tabId> <method> [params_json]` | 发送原生 Chrome DevTools Protocol (CDP) 指令。 |
-| `group` / `tag` | `py server/cli.py group [tabId]` | 手动将已有标签页归入 `[Gemini]` 标签组。 |
-| `ungroup` | `py server/cli.py ungroup [--tab <tabId>]` | 解散 `[Gemini]` 标签组或移出指定标签页。 |
-| `close` | `py server/cli.py close <tabId>` | 关闭指定的浏览器标签页。 |
-
-### HTTP REST API 接口清单
-
-本地服务在 `http://127.0.0.1:9224` 提供标准化 HTTP API：
-
-| 方法 | 路径 | 请求体 (JSON) | 功能说明 |
-|---|---|---|---|
-| `GET` | `/health` | 无 | 获取服务运行状态及已连接浏览器信息。 |
-| `GET` | `/tabs` | 无 | 获取当前所有标签页列表。 |
-| `GET` | `/active_tab` | 无 | 获取当前处于激活状态的标签页信息。 |
-| `POST` | `/new_tab` | `{"url": "...", "active": true}` | 在 `[Gemini]` 组中创建新标签页。 |
-| `POST` | `/navigate` | `{"tabId": 123, "url": "..."}` | 让指定标签页导航到目标网址。 |
-| `POST` | `/snap` | `{"tabId": 123}` | 提取页面结构快照与带标号交互元素。 |
-| `POST` | `/click` | `{"tabId": 123, "selector": "#btn"}` | 模拟点击元素（支持编号或 CSS 选择器）。 |
-| `POST` | `/type` | `{"tabId": 123, "selector": "#kw", "text": "...", "clear": true}` | 模拟输入文本内容。 |
-| `POST` | `/content` | `{"tabId": 123}` | 提取网页标题、网址与主体文本。 |
-| `POST` | `/screenshot`| `{"tabId": 123, "output": "page.png"}` | 截取网页截图（返回 base64 或直接写入文件）。 |
-| `POST` | `/eval` | `{"tabId": 123, "expression": "document.title"}` | 在页面中执行 JavaScript 脚本。 |
-| `POST` | `/cdp` | `{"tabId": 123, "method": "...", "params": {...}}` | 执行原生 CDP 指令。 |
-| `POST` | `/group` | `{"tabId": 123}` | 将标签页加入 `[Gemini]` 标签组。 |
-| `POST` | `/ungroup` | `{"tabId": 123}` (可选) | 解散 `[Gemini]` 标签组或移出标签页。 |
-| `POST` | `/close_tab`| `{"tabId": 123}` | 关闭标签页。 |
-
-### Antigravity 插件集成
-
-若需在 Antigravity 中全局使用本能力：
-- 将本仓库拷贝或链接至 `~/.gemini/config/plugins/browser-bridge`（全局）或工作区 `.agents/plugins/browser-bridge`。
-- 本仓库已内置标准 Skill 定义（`skills/browser-bridge/SKILL.md`），安装后 Agent 会自动调用该能力进行网页浏览与自动化交互。
-
-### 安全与隐私
-
-- **仅限本地回环**：WebSocket (`9223`) 与 HTTP (`9224`) 服务严格绑定到 `127.0.0.1`，不监听外部网络。
-- **无云端中继**：网页 DOM、快照与截图全程在本地机器流转，绝不上传任何云端服务器。
-- **原生安全提示**：Chromium 会在调试接口被附加时展示原生黄色提示条，确保操作完全透明可知。
-
-### 开源协议
-
-本项目采用 Apache License 2.0 许可证。
+Original project: [AshenJyy/antigravity-browser-bridge](https://github.com/AshenJyy/antigravity-browser-bridge). License: [Apache-2.0](LICENSE).

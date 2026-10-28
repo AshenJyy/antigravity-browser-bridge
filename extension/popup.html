@@ -1,205 +1,68 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <title>Antigravity Browser Bridge</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Browser Bridge</title>
   <style>
-    :root {
-      --bg: #0f172a;
-      --card-bg: #1e293b;
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
-      --accent: #6366f1;
-      --accent-hover: #4f46e5;
-      --success: #10b981;
-      --danger: #ef4444;
-      --border: #334155;
-    }
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    }
-    body {
-      width: 320px;
-      background: var(--bg);
-      color: var(--text);
-      padding: 14px;
-      font-size: 13px;
-    }
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding-bottom: 12px;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 12px;
-    }
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-weight: 600;
-      font-size: 14px;
-      color: #c7d2fe;
-    }
-    .logo-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: var(--accent);
-      box-shadow: 0 0 8px var(--accent);
-    }
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      font-size: 11px;
-      padding: 3px 8px;
-      border-radius: 12px;
-      font-weight: 500;
-    }
-    .status-connected {
-      background: rgba(16, 185, 129, 0.15);
-      color: var(--success);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-    }
-    .status-disconnected {
-      background: rgba(239, 68, 68, 0.15);
-      color: var(--danger);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-    }
-    .dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-    }
-    .status-connected .dot { background: var(--success); }
-    .status-disconnected .dot { background: var(--danger); }
-
-    .card {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 10px 12px;
-      margin-bottom: 10px;
-    }
-    .card-title {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--text-muted);
-      margin-bottom: 6px;
-    }
-    .tab-info-title {
-      font-weight: 500;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      margin-bottom: 4px;
-    }
-    .tab-info-url {
-      font-size: 11px;
-      color: var(--text-muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .actions {
-      display: flex;
-      gap: 8px;
-      margin-top: 10px;
-    }
-    button {
-      flex: 1;
-      padding: 7px 10px;
-      border: none;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: background 0.2s, opacity 0.2s;
-    }
-    .btn-primary {
-      background: var(--accent);
-      color: #fff;
-    }
-    .btn-primary:hover {
-      background: var(--accent-hover);
-    }
-    .btn-danger {
-      background: var(--danger);
-      color: #fff;
-    }
-    .btn-secondary {
-      background: #334155;
-      color: #e2e8f0;
-    }
-    .btn-secondary:hover {
-      background: #475569;
-    }
-    .info-row {
-      display: flex;
-      justify-content: space-between;
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-top: 4px;
-    }
-    .tips {
-      font-size: 11px;
-      color: #64748b;
-      margin-top: 8px;
-      line-height: 1.4;
+    :root { color-scheme: light dark; font: 13px/1.55 system-ui, sans-serif; }
+    body { margin: 0; width: 340px; color: #172033; background: #f7f9fc; }
+    main { padding: 22px; }
+    h1 { margin: 0; font-size: 22px; letter-spacing: -.5px; }
+    p { margin: 6px 0 16px; }
+    .muted { color: #64748b; font-size: 12px; }
+    .status { border: 1px solid #d9e1ec; border-radius: 10px; padding: 12px; background: #fff; margin-bottom: 18px; overflow-wrap: anywhere; }
+    .status strong { display: block; color: #475569; margin-bottom: 5px; }
+    .status.online strong { color: #15803d; }
+    .status p { margin: 0; }
+    label { display: block; font-weight: 600; margin: 12px 0 5px; }
+    input, button { box-sizing: border-box; width: 100%; border: 1px solid #cbd5e1; border-radius: 7px; font: inherit; padding: 9px 10px; }
+    input { background: #fff; color: #172033; }
+    button { cursor: pointer; margin-top: 12px; background: #2563eb; border-color: #2563eb; color: #fff; font-weight: 600; }
+    button.secondary { background: #fff; border-color: #cbd5e1; color: #334155; }
+    button:disabled { opacity: .55; cursor: wait; }
+    #message { color: #b91c1c; margin-top: 12px; overflow-wrap: anywhere; }
+    #sessionList { padding-left: 18px; max-height: 135px; overflow: auto; }
+    details { margin-top: 16px; }
+    code { font: 11px/1.5 ui-monospace, monospace; overflow-wrap: anywhere; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #111827; color: #e2e8f0; }
+      .status, input, button.secondary { background: #1e293b; color: #e2e8f0; border-color: #475569; }
+      .muted { color: #94a3b8; }
+      .status strong { color: #cbd5e1; }
+      .status.online strong { color: #4ade80; }
+      #message { color: #fca5a5; }
     }
   </style>
 </head>
 <body>
-  <div class="header">
-    <div class="brand">
-      <div class="logo-dot"></div>
-      Antigravity Bridge
-      <span id="browserBadge" style="font-size: 10px; background: #312e81; color: #a5b4fc; padding: 1px 5px; border-radius: 4px; font-weight: normal; margin-left: 4px;">Edge / Chrome</span>
-    </div>
-    <div style="display: flex; align-items: center; gap: 6px;">
-      <button id="langToggleBtn" style="font-size: 10px; padding: 2px 6px; background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 4px; cursor: pointer; flex: none;">EN / 中</button>
-      <div id="statusBadge" class="status-badge status-disconnected">
-        <span class="dot"></span>
-        <span id="statusText" data-i18n="statusDisconnected">未连接</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-title" data-i18n="activeTabCard">当前标签页</div>
-    <div id="currentTabTitle" class="tab-info-title" data-i18n="loading">加载中...</div>
-    <div id="currentTabUrl" class="tab-info-url">-</div>
-    <div class="info-row">
-      <span>Tab ID: <strong id="currentTabId">-</strong></span>
-      <span><span data-i18n="debugStatusLabel">调试状态:</span> <strong id="debugStatus">-</strong></span>
-    </div>
-    <div class="actions">
-      <button id="toggleDebugBtn" class="btn-primary" data-i18n="btnAttach">接入当前页</button>
-      <button id="reconnectBtn" class="btn-secondary" data-i18n="btnReconnect">重连服务</button>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-title" data-i18n="bridgeServiceCard">桥接服务</div>
-    <div class="info-row">
-      <span data-i18n="localAddressLabel">本地地址:</span>
-      <span style="color: #cbd5e1;">ws://127.0.0.1:9223</span>
-    </div>
-    <div class="info-row">
-      <span data-i18n="attachedCountLabel">已接入标签页:</span>
-      <span id="attachedCount" style="color: #cbd5e1;">0</span>
-    </div>
-  </div>
-
-  <div class="tips" id="tipsText" data-i18n="tips">
-    提示：保持本地 Python Bridge 运行。Antigravity 可直接向你当前选中的浏览器标签页发送点击、求值和输入指令。
-  </div>
-
-  <script src="popup.js"></script>
+  <main>
+    <h1>Browser Bridge</h1>
+    <p class="muted">DSH · Antigravity · Microsoft Edge</p>
+    <section id="statusBox" class="status" aria-live="polite">
+      <strong id="state">正在读取状态…</strong>
+      <p id="description" class="muted"></p>
+    </section>
+    <form id="pairForm">
+      <label for="port">本地服务端口</label>
+      <input id="port" type="number" min="1024" max="65535" value="9224" required>
+      <label for="token">配对令牌</label>
+      <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴本地 bridge 提供的令牌">
+      <p id="pairHint" class="muted">令牌保存在当前浏览器 profile 中，不会显示在状态信息里。</p>
+      <button id="connect" type="submit">保存并连接</button>
+    </form>
+    <button id="release" class="secondary" type="button">暂停连接并释放全部标签页</button>
+    <div id="message" role="alert"></div>
+    <details>
+      <summary id="sessionCount">受控标签页：0</summary>
+      <ul id="sessionList"></ul>
+    </details>
+    <details>
+      <summary>浏览器实例</summary>
+      <code id="instance"></code>
+      <p class="muted">每个 profile 使用独立实例。释放标签页会解除调试和分组，不会关闭网页。</p>
+    </details>
+  </main>
+  <script type="module" src="popup.js"></script>
 </body>
 </html>

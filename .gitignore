@@ -29,3 +29,9 @@ Thumbs.db
 *.lnk
 
 *.zip
+
+# Node runtime and local verification
+node_modules/
+work/
+runtime/
+*.tgz

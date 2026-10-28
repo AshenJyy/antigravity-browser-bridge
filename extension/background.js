@@ -1,654 +1,447 @@
-// Antigravity Browser Bridge - Background Service Worker
+import { BridgeError, fail, validateConfig, allowedURL, downloadFilename, keyDefinition, tabMetadata, groupLabel, boundedNumber, commandError, SerialQueue } from './bridge-utils.mjs';
+import { domOperation } from './dom.js';
 
-const WS_URL = "ws://127.0.0.1:9223";
-let socket = null;
-let isConnected = false;
-let reconnectTimer = null;
-const attachedTabs = new Set();
-const agentOpenedTabs = new Set();
-
-console.log("[Antigravity Bridge] Service Worker initializing...");
-
-// Keep-alive alarm to prevent MV3 background worker from sleeping unexpectedly
-chrome.alarms.create("keepAlive", { periodInMinutes: 0.25 });
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "keepAlive") {
-    if (!isConnected) {
-      connectWebSocket();
-    } else if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "ping", timestamp: Date.now() }));
-    }
-  }
+const VERSION = '2.0.0', WORLD = 'BrowserBridge-v2';
+let config = { port: 9224, token: '', enabled: true }, instanceId, daemonId, socket;
+let connected = false, initialized = false, statusMessage = 'Paste a pairing token to connect.';
+let reconnectTimer, heartbeatTimer, reconnectAttempt = 0;
+const attached = new Set(), intentionalDetach = new Set();
+const owners = new Map(), downloads = new Map(), childSessions = new Map(), refs = new Map(), dialogs = new Map(), contexts = new Map(), controllers = new Map();
+const eventOutbox = new Map();
+const queue = new SerialQueue(), initQueue = new SerialQueue();
+const cdp = (tabId, method, params = {}, sessionId) => chrome.debugger.sendCommand({ tabId, ...(sessionId ? { sessionId } : {}) }, method, params);
+const send = message => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); };
+const badge = () => {
+  chrome.action.setBadgeText({ text: connected ? 'ON' : config.enabled && config.token ? '…' : 'OFF' });
+  chrome.action.setBadgeBackgroundColor({ color: connected ? '#15803d' : '#64748b' });
+};
+const saveSession = () => chrome.storage.session.set({ owners: [...owners], downloads: [...downloads], daemonId: daemonId || null, eventOutbox: [...eventOutbox] });
+function publishEvent(event) {
+  if (connected && socket?.readyState === WebSocket.OPEN) send(event);
+  else { eventOutbox.set(event.tabId, event); void saveSession(); }
+}
+const assertActive = signal => { if (signal?.aborted) fail('CANCELLED', 'The operation was cancelled.'); };
+const delay = (ms, signal) => new Promise((resolve, reject) => {
+  assertActive(signal);
+  const onAbort = () => { clearTimeout(timer); reject(new BridgeError('CANCELLED', 'The operation was cancelled.')); };
+  const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+  signal?.addEventListener('abort', onAbort, { once: true });
 });
 
-function getBrowserInfo() {
-  const ua = navigator.userAgent;
-  if (ua.includes("Edg/")) {
-    const m = ua.match(/Edg\/([\d.]+)/);
-    return { name: "Microsoft Edge", version: m ? m[1] : "" };
-  }
-  if (ua.includes("Chrome/")) {
-    const m = ua.match(/Chrome\/([\d.]+)/);
-    return { name: "Google Chrome", version: m ? m[1] : "" };
-  }
-  return { name: "Chromium Browser", version: "" };
-}
-
-function connectWebSocket() {
-  if (socket && (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN)) {
-    return;
-  }
-
-  try {
-    socket = new WebSocket(WS_URL);
-
-    socket.onopen = async () => {
-      console.log("[Antigravity Bridge] Connected to local server:", WS_URL);
-      isConnected = true;
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
-      chrome.action.setBadgeText({ text: "ON" });
-      chrome.action.setBadgeBackgroundColor({ color: "#10B981" }); // green
-      const bInfo = getBrowserInfo();
-      socket.send(JSON.stringify({
-        type: "client_hello",
-        client: bInfo.name,
-        browserVersion: bInfo.version,
-        version: chrome.runtime.getManifest().version
-      }));
-      await checkAndCleanupGeminiGroup();
-    };
-
-    socket.onmessage = async (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg.type === "pong") return;
-        if (msg.type === "request") {
-          const response = await handleCommand(msg);
-          socket.send(JSON.stringify({
-            type: "response",
-            id: msg.id,
-            ...response
-          }));
-        }
-      } catch (err) {
-        console.error("[Antigravity Bridge] Message processing error:", err);
-      }
-    };
-
-    socket.onclose = () => {
-      console.warn("[Antigravity Bridge] WebSocket disconnected. Retrying in 3s...");
-      isConnected = false;
-      chrome.action.setBadgeText({ text: "OFF" });
-      chrome.action.setBadgeBackgroundColor({ color: "#EF4444" }); // red
-      scheduleReconnect();
-    };
-
-    socket.onerror = (err) => {
-      console.error("[Antigravity Bridge] WebSocket error:", err);
-      try { socket.close(); } catch (_) {}
-    };
-  } catch (err) {
-    console.error("[Antigravity Bridge] Connection failed:", err);
-    scheduleReconnect();
-  }
+async function initialize() {
+  if (initialized) return;
+  return initQueue.run('initialize', async () => {
+    if (initialized) return;
+    const stored = await chrome.storage.local.get(['config', 'instanceId']);
+    config = validateConfig(stored.config);
+    instanceId = stored.instanceId || crypto.randomUUID();
+    await chrome.storage.local.set({ instanceId });
+    const state = await chrome.storage.session.get(['owners', 'downloads', 'daemonId', 'eventOutbox']);
+    daemonId = state.daemonId;
+    for (const [id, owner] of state.owners || []) owners.set(Number(id), owner);
+    for (const [id, item] of state.downloads || []) downloads.set(Number(id), item);
+    for (const [id, item] of state.eventOutbox || []) eventOutbox.set(Number(id), item);
+    const tabs = new Set((await chrome.tabs.query({})).map(tab => tab.id));
+    for (const id of owners.keys()) if (!tabs.has(id)) {
+      owners.delete(id); eventOutbox.set(id, { type: 'event', event: 'tab_closed', tabId: id });
+    }
+    for (const target of await chrome.debugger.getTargets()) if (target.attached && owners.has(target.tabId)) {
+      // sendCommand succeeds only for our debugger, not another extension's.
+      try { await cdp(target.tabId, 'Runtime.enable'); await cdp(target.tabId, 'Page.enable'); attached.add(target.tabId); await enableChildren(target.tabId); } catch { /* Explicit claim reports attachment errors. */ }
+    }
+    for (const id of owners.keys()) if (!attached.has(id)) {
+      owners.delete(id);
+      await chrome.tabs.ungroup(id).catch(() => {});
+      eventOutbox.set(id, { type: 'event', event: 'detached', tabId: id, reason: 'debugger_not_attached_after_worker_restart' });
+    }
+    await saveSession();
+    initialized = true;
+    badge();
+  });
 }
 
 function scheduleReconnect() {
-  if (!reconnectTimer) {
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null;
-      connectWebSocket();
-    }, 3000);
-  }
+  clearTimeout(reconnectTimer);
+  if (!config.enabled || !config.token) return;
+  reconnectTimer = setTimeout(() => connect().catch(connectionError), Math.min(30000, 1000 * 2 ** Math.min(reconnectAttempt++, 5)));
 }
-
-// Forward CDP events to the local bridge
-chrome.debugger.onEvent.addListener((source, method, params) => {
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify({
-      type: "cdp_event",
-      tabId: source.tabId,
-      method,
-      params
-    }));
-  }
-});
-
-chrome.debugger.onDetach.addListener((source, reason) => {
-  console.log(`[Antigravity Bridge] Debugger detached from tab ${source.tabId}:`, reason);
-  attachedTabs.delete(source.tabId);
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify({
-      type: "tab_detached",
-      tabId: source.tabId,
-      reason
-    }));
-  }
-});
-
-// Helper: Ensure debugger is attached to tab
-async function ensureDebuggerAttached(tabId) {
-  if (attachedTabs.has(tabId)) return true;
-  try {
-    await chrome.debugger.attach({ tabId }, "1.3");
-    attachedTabs.add(tabId);
-    return true;
-  } catch (err) {
-    const errMsg = (err.message || "").toLowerCase();
-    if (errMsg.includes("already attached")) {
-      attachedTabs.add(tabId);
-      return true;
-    }
-    throw err;
-  }
-}
-
-// Helper: Clean up any previously injected overlay DOM/styles
-async function cleanupGeminiOverlay(tabId) {
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      world: "MAIN",
-      func: () => {
-        document.getElementById("__gemini_badge")?.remove();
-        document.getElementById("__gemini_virtual_pointer")?.remove();
-        document.getElementById("__gemini_overlay_styles")?.remove();
-        document.querySelectorAll(".__gemini_ripple").forEach(r => r.remove());
-        if (document.title.startsWith("✨ [Gemini] ")) {
-          document.title = document.title.replace(/^✨\s*\[Gemini\]\s*/, "");
+function connectionError(error) { statusMessage = error?.message || 'Connection failed.'; connected = false; badge(); scheduleReconnect(); }
+async function connect() {
+  await initialize();
+  if (!config.enabled || !config.token || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
+  const current = new WebSocket(`ws://127.0.0.1:${config.port}/extension`);
+  socket = current;
+  statusMessage = 'Connecting to the local bridge…';
+  badge();
+  const handshakeTimer = setTimeout(() => { if (!connected && socket === current) current.close(1000, 'Handshake timeout'); }, 6000);
+  current.onopen = () => current.send(JSON.stringify({ type: 'hello', protocol: 2, token: config.token, instanceId, browser: navigator.userAgent.includes('Edg/') ? 'Microsoft Edge' : 'Google Chrome', version: VERSION }));
+  current.onmessage = event => {
+    let message;
+    try { message = JSON.parse(event.data); } catch { current.close(1002, 'Invalid JSON'); return; }
+    if (socket !== current) return;
+    if (message.type === 'welcome') {
+      void initQueue.run('welcome', async () => {
+        if (message.protocol !== 2 || !message.daemonId) { statusMessage = 'Incompatible bridge protocol. Update both plugin and extension.'; current.close(); return; }
+        if (daemonId !== message.daemonId) {
+          for (const id of [...owners.keys()]) await releaseTab(id).catch(() => {});
+          downloads.clear(); daemonId = message.daemonId; await saveSession();
         }
-      }
+        if (socket !== current || current.readyState !== WebSocket.OPEN) return;
+        connected = true; reconnectAttempt = 0;
+        for (const event of eventOutbox.values()) send(event);
+        eventOutbox.clear(); await saveSession();
+        statusMessage = 'Connected. Only explicitly claimed tabs can be controlled.';
+        clearTimeout(handshakeTimer); clearInterval(heartbeatTimer);
+        heartbeatTimer = setInterval(() => send({ type: 'ping' }), 20000);
+        badge();
+      }).catch(connectionError);
+    } else if (message.type === 'ping') current.send(JSON.stringify({ type: 'pong' }));
+    else if (message.type === 'cancel') controllers.get(message.id)?.abort();
+    else if (message.type === 'command') void executeMessage(current, message);
+  };
+  current.onclose = event => {
+    clearTimeout(handshakeTimer);
+    if (socket !== current) return;
+    connected = false; clearInterval(heartbeatTimer);
+    for (const controller of controllers.values()) controller.abort();
+    statusMessage = event.code === 1008 ? 'Pairing rejected. Check the token and port.' : 'Bridge disconnected. Reconnecting automatically…';
+    badge(); scheduleReconnect();
+  };
+  current.onerror = () => { statusMessage = 'Local bridge unavailable. Start Browser Bridge or check its port.'; };
+}
+
+async function executeMessage(current, message) {
+  const controller = new AbortController();
+  controllers.set(message.id, controller);
+  try {
+    await initQueue.run('welcome', async () => {});
+    const result = await queue.run(message.tabId ?? 'global', async () => {
+      assertActive(controller.signal);
+      if (socket !== current || !connected) fail('DISCONNECTED', 'Connection changed before the operation started.');
+      return dispatch(message, controller.signal);
     });
-  } catch (_) {}
+    if (current.readyState === WebSocket.OPEN) current.send(JSON.stringify({ type: 'result', id: message.id, ok: true, result }));
+  } catch (error) {
+    if (current.readyState === WebSocket.OPEN) current.send(JSON.stringify({ type: 'result', id: message.id, ok: false, error: commandError(error) }));
+  } finally { controllers.delete(message.id); }
 }
 
-// Helper: Native Edge/Chrome Tab Group ("Gemini" / Purple)
-async function addTabToGeminiGroup(tabId) {
-  try {
-    const tab = await chrome.tabs.get(tabId);
-    if (!tab) return null;
-    const windowId = tab.windowId;
-    agentOpenedTabs.add(tabId);
-
-    const groups = await chrome.tabGroups.query({ windowId });
-    const existingGroup = groups.find(g => g.title === "Gemini");
-
-    let groupId;
-    if (existingGroup) {
-      groupId = await chrome.tabs.group({ tabIds: [tabId], groupId: existingGroup.id });
-    } else {
-      groupId = await chrome.tabs.group({ tabIds: [tabId] });
-      await chrome.tabGroups.update(groupId, {
-        title: "Gemini",
-        color: "purple",
-        collapsed: false
-      });
-    }
-    await setTabGeminiLogo(tabId);
-    return groupId;
-  } catch (err) {
-    console.warn("[Antigravity Bridge] Could not group tab:", err);
-    return null;
+async function ensureAttached(tabId) {
+  if (attached.has(tabId)) return;
+  try { await chrome.debugger.attach({ tabId }, '1.3'); }
+  catch (error) { fail('ATTACH_FAILED', `Cannot attach: ${error.message}. Close this tab's DevTools or check browser policy.`); }
+  attached.add(tabId);
+  await cdp(tabId, 'Page.enable'); await cdp(tabId, 'Runtime.enable'); await enableChildren(tabId);
+}
+async function enableChildren(tabId, sessionId) {
+  try { await cdp(tabId, 'Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true, filter: [{ type: 'iframe', exclude: false }] }, sessionId); }
+  catch { /* Unsupported child targets report FRAME_UNAVAILABLE; never silently switch frames. */ }
+}
+async function groupTab(tabId, session) {
+  const tab = await chrome.tabs.get(tabId);
+  const peer = [...owners].find(([id, owner]) => id !== tabId && owner.sessionId === session.id && owner.windowId === tab.windowId && owner.groupId >= 0);
+  let groupId;
+  if (peer) { try { groupId = await chrome.tabs.group({ tabIds: [tabId], groupId: peer[1].groupId }); } catch { /* User changed the group. */ } }
+  if (groupId === undefined) {
+    groupId = await chrome.tabs.group({ tabIds: [tabId] });
+    await chrome.tabGroups.update(groupId, { title: groupLabel(session), color: session.client === 'dsh' ? 'blue' : session.client === 'antigravity' ? 'purple' : 'cyan', collapsed: false });
   }
+  owners.set(tabId, { sessionId: session.id, client: session.client, windowId: tab.windowId, groupId });
+  await saveSession();
 }
-
-// Helper: Close/disband Gemini group when no agent-opened tabs exist
-async function checkAndCleanupGeminiGroup(windowId = null) {
-  try {
-    const queryParam = windowId ? { windowId } : {};
-    const groups = await chrome.tabGroups.query(queryParam);
-    for (const group of groups) {
-      if (group.title === "Gemini") {
-        const tabsInGroup = await chrome.tabs.query({ groupId: group.id });
-        const agentTabs = tabsInGroup.filter(t => agentOpenedTabs.has(t.id));
-        // If there are NO agent-opened tabs in this group, disband/close it by ungrouping remaining tabs
-        if (agentTabs.length === 0 && tabsInGroup.length > 0) {
-          await chrome.tabs.ungroup(tabsInGroup.map(t => t.id));
-          console.log(`[Antigravity Bridge] Disbanded Gemini group ${group.id} (no agent tabs remaining).`);
-        }
-      }
-    }
-  } catch (err) {
-    console.warn("[Antigravity Bridge] checkAndCleanupGeminiGroup error:", err);
+async function releaseTab(tabId) {
+  owners.delete(tabId); refs.delete(tabId); childSessions.delete(tabId); contexts.delete(tabId); dialogs.delete(tabId);
+  if (attached.has(tabId)) {
+    intentionalDetach.add(tabId);
+    try { await chrome.debugger.detach({ tabId }); } catch { intentionalDetach.delete(tabId); }
+    attached.delete(tabId);
   }
+  try { await chrome.tabs.ungroup(tabId); } catch { /* Already closed or ungrouped. */ }
+  await saveSession();
+  return { released: true };
+}
+function owned(tabId, session) {
+  if (!Number.isInteger(tabId)) fail('INVALID_ARGUMENT', 'An explicit tab is required.');
+  if (owners.get(tabId)?.sessionId !== session?.id) fail('TAB_NOT_OWNED', 'Explicitly claim this tab before controlling it.');
 }
 
-// Official Google Gemini gradient star vector icon
-const GEMINI_SVG_DATA = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'><stop offset='0%25' stop-color='%234285F4'/><stop offset='35%25' stop-color='%239B72CB'/><stop offset='70%25' stop-color='%23D96570'/><stop offset='100%25' stop-color='%23FFA439'/></linearGradient></defs><path d='M16 1 C16 9.28 9.28 16 1 16 C9.28 16 16 22.72 16 31 C16 22.72 22.72 16 31 16 C22.72 16 16 9.28 16 1 Z' fill='url(%23g)'/></svg>";
+async function frames(tabId) {
+  await ensureAttached(tabId);
+  const list = [];
+  const add = (tree, sessionId) => {
+    const found = list.find(frame => frame.id === tree.frame.id);
+    if (!found) list.push({ id: tree.frame.id, parentId: tree.frame.parentId, url: tree.frame.url, name: tree.frame.name || '', sessionId });
+    else if (sessionId) Object.assign(found, { sessionId });
+    for (const child of tree.childFrames || []) add(child, sessionId);
+  };
+  add((await cdp(tabId, 'Page.getFrameTree')).frameTree);
+  for (const sessionId of childSessions.get(tabId)?.keys() || []) {
+    try { add((await cdp(tabId, 'Page.getFrameTree', {}, sessionId)).frameTree, sessionId); } catch { /* Detached child. */ }
+  }
+  return list;
+}
+async function frameContext(tabId, args) {
+  const list = await frames(tabId);
+  let frameId = args.frameId;
+  if (args.ref) {
+    const reference = refs.get(tabId)?.get(args.ref);
+    if (!reference) fail('STALE_REFERENCE', 'The reference expired. Take a new snapshot of this tab.');
+    if (frameId && frameId !== reference.frameId) fail('INVALID_ARGUMENT', 'ref and frameId identify different frames.');
+    frameId = reference.frameId;
+  }
+  const frame = frameId ? list.find(item => item.id === frameId) : list[0];
+  if (!frame) fail('FRAME_NOT_FOUND', 'The frame no longer exists. Take a new snapshot.');
+  let executionContextId;
+  try { ({ executionContextId } = await cdp(tabId, 'Page.createIsolatedWorld', { frameId: frame.id, worldName: WORLD, grantUniveralAccess: false }, frame.sessionId)); }
+  catch (error) { fail('FRAME_UNAVAILABLE', `Cannot access frame ${frame.id}: ${error.message}. Cross-process frames require Edge 125+.`); }
+  return { ...frame, executionContextId };
+}
+function unwrapEvaluation(response) {
+  if (response.exceptionDetails) {
+    const description = response.exceptionDetails.exception?.description || response.exceptionDetails.text;
+    const match = description.match(/BB:([A-Z_]+):([^\n]*)/);
+    if (match) fail(match[1], match[2]);
+    fail('EVALUATION_FAILED', description);
+  }
+  return response.result;
+}
+async function dom(tabId, operation, args, returnByValue = true, context) {
+  context ||= await frameContext(tabId, args);
+  const result = unwrapEvaluation(await cdp(tabId, 'Runtime.callFunctionOn', { functionDeclaration: domOperation.toString(), executionContextId: context.executionContextId, arguments: [{ value: operation }, { value: args }], returnByValue, awaitPromise: true, objectGroup: 'browser-bridge' }, context.sessionId));
+  return { value: returnByValue ? result.value : result.objectId, context };
+}
 
-// Set crisp official Gemini Logo as Favicon (ONLY for tabs opened by agent)
-async function setTabGeminiLogo(tabId) {
-  if (!agentOpenedTabs.has(tabId)) return;
+async function frameOffset(tabId, frameId) {
+  const list = await frames(tabId), frame = list.find(item => item.id === frameId);
+  if (!frame?.parentId) return { x: 0, y: 0 };
+  const parent = list.find(item => item.id === frame.parentId);
+  if (!parent) fail('FRAME_UNAVAILABLE', 'Cannot resolve the parent frame for coordinate input.');
+  let owner;
+  try { owner = await cdp(tabId, 'DOM.getFrameOwner', { frameId }, parent.sessionId); }
+  catch { fail('FRAME_UNAVAILABLE', 'Cannot determine frame geometry. Use top-level screenshot coordinates.'); }
+  const { model } = await cdp(tabId, 'DOM.getBoxModel', { backendNodeId: owner.backendNodeId }, parent.sessionId), quad = model.content;
+  if (Math.abs(quad[1] - quad[3]) > 1 || Math.abs(quad[0] - quad[6]) > 1 || Math.abs(quad[2] - quad[0] - model.width) > 4) fail('UNSUPPORTED_FRAME_TRANSFORM', 'Transformed cross-process frames require screenshot coordinates.');
+  const outer = parent.sessionId ? await frameOffset(tabId, parent.id) : { x: 0, y: 0 };
+  return { x: quad[0] + outer.x, y: quad[1] + outer.y };
+}
+async function elementPoint(tabId, args) {
+  if (args.x !== undefined || args.y !== undefined) {
+    const x = boundedNumber(args.x, undefined, 0, 100000, 'x'), y = boundedNumber(args.y, undefined, 0, 100000, 'y');
+    if (x === undefined || y === undefined) fail('INVALID_ARGUMENT', 'Both x and y are required.');
+    return { x, y };
+  }
+  const context = await frameContext(tabId, args);
+  await dom(tabId, 'prepare', { ...args, hitTest: true }, true, context);
+  const { value: objectId } = await dom(tabId, 'resolve', args, false, context);
   try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      world: "MAIN",
-      func: (svgUrl) => {
-        document.querySelectorAll("link[rel*='icon']").forEach(l => l.remove());
-        const link = document.createElement("link");
-        link.rel = "icon";
-        link.type = "image/svg+xml";
-        link.href = svgUrl;
-        document.head.appendChild(link);
-        document.title = document.title.replace(/^[✨🖱️↖️👆✦\\[\\]\\s]+/, "");
-      },
-      args: [GEMINI_SVG_DATA]
-    });
-  } catch (_) {}
+    const result = await cdp(tabId, 'DOM.getContentQuads', { objectId }, context.sessionId);
+    const quad = result.quads?.find(q => Math.abs((q[2] - q[0]) * (q[7] - q[1]) - (q[3] - q[1]) * (q[6] - q[0])) > 1);
+    if (!quad) fail('ELEMENT_HIDDEN', 'The element has no clickable area.');
+    let x = (quad[0] + quad[2] + quad[4] + quad[6]) / 4, y = (quad[1] + quad[3] + quad[5] + quad[7]) / 4;
+    if (context.sessionId) { const offset = await frameOffset(tabId, context.id); x += offset.x; y += offset.y; }
+    return { x, y };
+  } finally { await cdp(tabId, 'Runtime.releaseObject', { objectId }, context.sessionId).catch(() => {}); }
+}
+async function keyPress(tabId, key, modifiers = []) {
+  const event = keyDefinition(key, modifiers);
+  await cdp(tabId, 'Input.dispatchKeyEvent', { type: event.text ? 'keyDown' : 'rawKeyDown', ...event });
+  const { text, ...up } = event;
+  await cdp(tabId, 'Input.dispatchKeyEvent', { type: 'keyUp', ...up });
+}
+async function waitForPage(tabId, signal) {
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    assertActive(signal);
+    if (dialogs.has(tabId)) return { waitingForDialog: true };
+    if ((await chrome.tabs.get(tabId)).status === 'complete') return { loaded: true };
+    await delay(100, signal);
+  }
+  return { loaded: false, warning: 'The action completed, but loading did not settle within 15 seconds.' };
 }
 
-// Auto-maintain Gemini Logo on grouped tabs ONLY if opened by agent
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (changeInfo.status === "complete" && tab.groupId && tab.groupId !== -1 && agentOpenedTabs.has(tabId)) {
+async function dispatch(message, signal) {
+  const { action, tabId, session } = message, args = message.args || {};
+  assertActive(signal);
+  if (!session?.id || !['dsh', 'antigravity', 'cli'].includes(session.client)) fail('INVALID_SESSION', 'A host session is required.');
+  if (action === 'tabs') return (await chrome.tabs.query({})).map(tabMetadata);
+  if (action === 'open') {
+    const tab = await chrome.tabs.create({ url: allowedURL(args.url || 'about:blank'), active: args.active !== false });
     try {
-      const group = await chrome.tabGroups.get(tab.groupId);
-      if (group && group.title === "Gemini") {
-        setTabGeminiLogo(tabId);
-      }
-    } catch (_) {}
+      await groupTab(tab.id, { ...session, label: args.label || session.label }); await ensureAttached(tab.id); await waitForPage(tab.id, signal);
+      return tabMetadata(await chrome.tabs.get(tab.id));
+    } catch (error) { await releaseTab(tab.id); throw error; }
   }
-});
-
-// Command dispatcher
-async function handleCommand(msg) {
-  const { action, tabId } = msg;
-
-  try {
-    switch (action) {
-      case "group":
-      case "tag": {
-        if (!tabId) return { success: false, error: "tabId required" };
-        agentOpenedTabs.add(tabId);
-        await cleanupGeminiOverlay(tabId);
-        const gId = await addTabToGeminiGroup(tabId);
-        return { success: true, message: `Tab ${tabId} added to Gemini group (${gId})` };
-      }
-
-      case "ungroup": {
-        if (tabId) {
-          try { await chrome.tabs.ungroup(tabId); } catch (_) {}
-          agentOpenedTabs.delete(tabId);
-        } else {
-          agentOpenedTabs.clear();
-        }
-        await checkAndCleanupGeminiGroup();
-        return { success: true, message: "Ungrouped tabs and cleaned up Gemini group." };
-      }
-
-      case "list_tabs": {
-        const tabs = await chrome.tabs.query({});
-        let groupMap = new Map();
-        try {
-          const groups = await chrome.tabGroups.query({});
-          groupMap = new Map(groups.map(g => [g.id, g.title]));
-        } catch (_) {}
-        return {
-          success: true,
-          data: tabs.map(t => ({
-            id: t.id,
-            windowId: t.windowId,
-            title: t.title,
-            url: t.url,
-            active: t.active,
-            groupId: t.groupId,
-            groupTitle: groupMap.get(t.groupId) || null,
-            isAgentTab: agentOpenedTabs.has(t.id),
-            attached: attachedTabs.has(t.id)
-          }))
-        };
-      }
-
-      case "get_active_tab": {
-        const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-        if (!activeTab) return { success: false, error: "No active tab found" };
-        return {
-          success: true,
-          data: {
-            id: activeTab.id,
-            title: activeTab.title,
-            url: activeTab.url,
-            attached: attachedTabs.has(activeTab.id)
-          }
-        };
-      }
-
-      case "attach": {
-        if (!tabId) return { success: false, error: "tabId is required" };
-        await ensureDebuggerAttached(tabId);
-        await cleanupGeminiOverlay(tabId);
-        // Do NOT add existing tabs to Gemini group on attach
-        return { success: true, message: `Attached to tab ${tabId}` };
-      }
-
-      case "detach": {
-        if (!tabId) return { success: false, error: "tabId is required" };
-        if (attachedTabs.has(tabId)) {
-          await chrome.debugger.detach({ tabId });
-          attachedTabs.delete(tabId);
-        }
-        return { success: true, message: `Detached from tab ${tabId}` };
-      }
-
-      case "navigate": {
-        if (!tabId || !msg.url) return { success: false, error: "tabId and url required" };
-        const updated = await chrome.tabs.update(tabId, { url: msg.url });
-        // Do NOT add existing tabs to Gemini group on navigate
-        return { success: true, data: { id: updated.id, url: updated.url } };
-      }
-
-      case "create_tab": {
-        const newTab = await chrome.tabs.create({ url: msg.url || "about:blank", active: msg.active !== false });
-        agentOpenedTabs.add(newTab.id);
-        await addTabToGeminiGroup(newTab.id);
-        return { success: true, data: { id: newTab.id, url: newTab.url } };
-      }
-
-      case "close_tab": {
-        if (!tabId) return { success: false, error: "tabId required" };
-        agentOpenedTabs.delete(tabId);
-        attachedTabs.delete(tabId);
-        try {
-          await chrome.tabs.remove(tabId);
-        } catch (_) {}
-        await checkAndCleanupGeminiGroup();
-        return { success: true, message: `Closed tab ${tabId}` };
-      }
-
-      case "cdp": {
-        if (!tabId || !msg.method) return { success: false, error: "tabId and method required" };
-        await ensureDebuggerAttached(tabId);
-        const result = await chrome.debugger.sendCommand({ tabId }, msg.method, msg.params || {});
-        return { success: true, data: result };
-      }
-
-      case "eval": {
-        if (!tabId || !msg.expression) return { success: false, error: "tabId and expression required" };
-        try {
-          const results = await chrome.scripting.executeScript({
-            target: { tabId },
-            world: "MAIN",
-            func: (code) => {
-              try {
-                return { ok: true, val: window.eval(code) };
-              } catch (e) {
-                return { ok: false, err: e.message || String(e) };
-              }
-            },
-            args: [msg.expression]
-          });
-          const res = results[0]?.result;
-          if (res && res.ok === false) {
-            return { success: false, error: res.err };
-          }
-          return { success: true, data: res ? res.val : null };
-        } catch (scriptErr) {
-          await ensureDebuggerAttached(tabId);
-          const result = await chrome.debugger.sendCommand({ tabId }, "Runtime.evaluate", {
-            expression: msg.expression,
-            returnByValue: true,
-            awaitPromise: true,
-            includeCommandLineAPI: true
-          });
-          if (result.exceptionDetails) {
-            return { success: false, error: result.exceptionDetails.text, details: result.exceptionDetails };
-          }
-          return { success: true, data: result.result ? result.result.value : null };
-        }
-      }
-
-      case "screenshot": {
-        if (!tabId) return { success: false, error: "tabId required" };
-        try {
-          const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: msg.format || "png" });
-          const base64 = dataUrl.replace(/^data:image\/[a-z]+;base64,/, "");
-          return { success: true, data: base64 };
-        } catch (_) {
-          await ensureDebuggerAttached(tabId);
-          const result = await chrome.debugger.sendCommand({ tabId }, "Page.captureScreenshot", {
-            format: msg.format || "png",
-            quality: msg.quality || 90
-          });
-          return { success: true, data: result.data };
-        }
-      }
-
-      case "get_content": {
-        if (!tabId) return { success: false, error: "tabId required" };
-        try {
-          const results = await chrome.scripting.executeScript({
-            target: { tabId },
-            func: () => {
-              return {
-                title: document.title,
-                url: window.location.href,
-                text: document.body ? document.body.innerText.substring(0, 50000) : "",
-                html: document.documentElement ? document.documentElement.outerHTML.substring(0, 100000) : ""
-              };
-            }
-          });
-          return { success: true, data: results[0]?.result };
-        } catch (_) {
-          await ensureDebuggerAttached(tabId);
-          const script = `(() => {
-            return {
-              title: document.title,
-              url: window.location.href,
-              text: document.body ? document.body.innerText.substring(0, 50000) : "",
-              html: document.documentElement ? document.documentElement.outerHTML.substring(0, 100000) : ""
-            };
-          })()`;
-          const res = await chrome.debugger.sendCommand({ tabId }, "Runtime.evaluate", {
-            expression: script,
-            returnByValue: true,
-            awaitPromise: true
-          });
-          return { success: true, data: res.result ? res.result.value : null };
-        }
-      }
-
-      case "snapshot": {
-        if (!tabId) return { success: false, error: "tabId required" };
-        try {
-          const results = await chrome.scripting.executeScript({
-            target: { tabId },
-            world: "MAIN",
-            func: () => {
-              const selectors = [
-                'button', 'a[href]', 'input', 'select', 'textarea',
-                '[role="button"]', '[role="link"]', '[role="checkbox"]',
-                '[role="tab"]', '[role="menuitem"]', '[contenteditable="true"]',
-                '[data-testid*="btn"]', '[data-testid*="button"]'
-              ].join(',');
-              const all = Array.from(document.querySelectorAll(selectors));
-              window.__agy_elements = window.__agy_elements || {};
-              window.__agy_elements = {};
-
-              const list = [];
-              let idx = 1;
-              for (const el of all) {
-                const rect = el.getBoundingClientRect();
-                if (rect.width === 0 || rect.height === 0) continue;
-                const style = window.getComputedStyle(el);
-                if (style.visibility === 'hidden' || style.display === 'none' || style.opacity === '0') continue;
-
-                let text = (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
-                if (text.length > 50) text = text.substring(0, 47) + '...';
-                const aria = el.getAttribute('aria-label');
-                const testid = el.getAttribute('data-testid');
-
-                if (!text && !aria && !testid && !el.id) continue;
-
-                window.__agy_elements[idx] = el;
-                let desc = `[#${idx}] <${el.tagName.toLowerCase()}>`;
-                if (text) desc += ` "${text}"`;
-                if (aria && aria !== text) desc += ` (aria: "${aria}")`;
-                if (testid && testid !== text) desc += ` [${testid}]`;
-                list.push(desc);
-                idx++;
-                if (idx > 80) break;
-              }
-
-              return {
-                url: window.location.href,
-                title: document.title,
-                count: list.length,
-                elements: list.join('\n')
-              };
-            }
-          });
-          return { success: true, data: results[0]?.result };
-        } catch (err) {
-          return { success: false, error: err.message || String(err) };
-        }
-      }
-
-      case "click": {
-        if (!tabId || !msg.selector) return { success: false, error: "tabId and target required" };
-        try {
-          const results = await chrome.scripting.executeScript({
-            target: { tabId },
-            world: "MAIN",
-            func: async (target) => {
-              let el = null;
-              // 1. Check index (#1, 1)
-              const idMatch = String(target).match(/^#?(\d+)$/);
-              if (idMatch && window.__agy_elements) {
-                el = window.__agy_elements[parseInt(idMatch[1], 10)];
-              }
-              // 2. Direct querySelector
-              if (!el) {
-                try { el = document.querySelector(target); } catch (_) {}
-              }
-              // 3. Fuzzy search by text, aria, or testid
-              if (!el) {
-                const lower = String(target).toLowerCase();
-                const candidates = Array.from(document.querySelectorAll('button, a, input, [role="button"], [data-testid]'));
-                el = candidates.find(c => {
-                  const text = (c.innerText || c.value || '').toLowerCase();
-                  const aria = (c.getAttribute('aria-label') || '').toLowerCase();
-                  const testid = (c.getAttribute('data-testid') || '').toLowerCase();
-                  return text.includes(lower) || aria.includes(lower) || testid.includes(lower);
-                });
-              }
-
-              if (!el) return { ok: false, error: `Target not found: "${target}"` };
-
-              el.scrollIntoView({ behavior: 'instant', block: 'center' });
-              el.focus();
-              el.click();
-
-              return {
-                ok: true,
-                tag: el.tagName.toLowerCase(),
-                text: (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim().substring(0, 50)
-              };
-            },
-            args: [msg.selector]
-          });
-          const res = results[0]?.result;
-          if (!res || !res.ok) {
-            return { success: false, error: res?.error || `Element not found: ${msg.selector}` };
-          }
-          return { success: true, data: res };
-        } catch (err) {
-          return { success: false, error: err.message || String(err) };
-        }
-      }
-
-      case "type": {
-        if (!tabId || !msg.selector || msg.text === undefined) return { success: false, error: "tabId, target and text required" };
-        try {
-          const results = await chrome.scripting.executeScript({
-            target: { tabId },
-            world: "MAIN",
-            func: (target, text, clear) => {
-              let el = null;
-              const idMatch = String(target).match(/^#?(\d+)$/);
-              if (idMatch && window.__agy_elements) {
-                el = window.__agy_elements[parseInt(idMatch[1], 10)];
-              }
-              if (!el) {
-                try { el = document.querySelector(target); } catch (_) {}
-              }
-              if (!el) {
-                const lower = String(target).toLowerCase();
-                const inputs = Array.from(document.querySelectorAll('input, textarea, [contenteditable="true"]'));
-                el = inputs.find(i => {
-                  const ph = (i.getAttribute('placeholder') || '').toLowerCase();
-                  const aria = (i.getAttribute('aria-label') || '').toLowerCase();
-                  const name = (i.getAttribute('name') || '').toLowerCase();
-                  return ph.includes(lower) || aria.includes(lower) || name.includes(lower);
-                });
-              }
-
-              if (!el) return { ok: false, error: `Input target not found: "${target}"` };
-
-              el.scrollIntoView({ behavior: 'instant', block: 'center' });
-              el.focus();
-              if (clear) el.value = '';
-              el.value = (el.value || '') + text;
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-
-              return {
-                ok: true,
-                value: el.value
-              };
-            },
-            args: [msg.selector, msg.text, msg.clear !== false]
-          });
-          const res = results[0]?.result;
-          if (!res || !res.ok) {
-            return { success: false, error: res?.error || `Input not found: ${msg.selector}` };
-          }
-          return { success: true, data: res };
-        } catch (err) {
-          return { success: false, error: err.message || String(err) };
-        }
-      }
-
-      case "reload_ext": {
-        setTimeout(() => chrome.runtime.reload(), 100);
-        return { success: true, message: "Reloading extension..." };
-      }
-
-      default:
-        return { success: false, error: `Unknown action: ${action}` };
+  if (action === 'claim') {
+    if (!Number.isInteger(tabId)) fail('INVALID_ARGUMENT', 'An explicit tab is required.');
+    if (owners.has(tabId) && owners.get(tabId).sessionId !== session.id) fail('TAB_BUSY', 'Another session owns this tab.');
+    await chrome.tabs.get(tabId); await ensureAttached(tabId);
+    try { await groupTab(tabId, session); } catch (error) { await releaseTab(tabId); throw error; }
+    return tabMetadata(await chrome.tabs.get(tabId));
+  }
+  owned(tabId, session);
+  if (action === 'release') return releaseTab(tabId);
+  if (action === 'close') { await chrome.tabs.remove(tabId); return { closed: true }; }
+  if (dialogs.has(tabId) && action !== 'dialog') {
+    const dialog = dialogs.get(tabId);
+    fail('DIALOG_OPEN', `A ${dialog.type} dialog is open: ${dialog.message}. Handle it with the dialog tool before continuing.`);
+  }
+  if (['navigate', 'back', 'forward', 'reload'].includes(action)) {
+    refs.delete(tabId);
+    if (action === 'navigate') await chrome.tabs.update(tabId, { url: allowedURL(args.url) });
+    else if (action === 'back') await chrome.tabs.goBack(tabId);
+    else if (action === 'forward') await chrome.tabs.goForward(tabId);
+    else await chrome.tabs.reload(tabId);
+    return { ...tabMetadata(await chrome.tabs.get(tabId)), ...await waitForPage(tabId, signal) };
+  }
+  await ensureAttached(tabId);
+  if (action === 'snapshot') {
+    const context = await frameContext(tabId, args), snapshotId = crypto.randomUUID();
+    const { value } = await dom(tabId, 'snapshot', { ...args, snapshotId, limit: Math.floor(boundedNumber(args.limit, 200, 1, 1000, 'limit')) }, true, context);
+    const tabRefs = refs.get(tabId) || new Map();
+    for (const [key, ref] of tabRefs) if (ref.frameId === context.id) tabRefs.delete(key);
+    for (const element of value.elements) tabRefs.set(element.ref, { frameId: context.id });
+    refs.set(tabId, tabRefs);
+    return { ...value, frameId: context.id, frames: (await frames(tabId)).map(({ sessionId, ...frame }) => frame), note: 'One frame per snapshot. Pass frameId for iframe content; refs select their own frame. Bounds are relative to that frame.' };
+  }
+  if (action === 'content') return (await dom(tabId, 'content', { ...args, maxChars: Math.floor(boundedNumber(args.maxChars, 30000, 1, 200000, 'maxChars')) })).value;
+  if (action === 'screenshot') {
+    const parameters = { format: 'png', fromSurface: true, captureBeyondViewport: !!args.fullPage };
+    if (args.fullPage) {
+      const metrics = await cdp(tabId, 'Page.getLayoutMetrics'), content = metrics.cssContentSize || metrics.contentSize;
+      if (content.width * content.height > 64000000 || content.width > 20000 || content.height > 50000) fail('SCREENSHOT_TOO_LARGE', 'Use viewport screenshots and scroll for a page this large.');
+      parameters.clip = { x: 0, y: 0, width: content.width, height: content.height, scale: 1 };
     }
-  } catch (err) {
-    return { success: false, error: err.message || String(err) };
+    return { mimeType: 'image/png', data: (await cdp(tabId, 'Page.captureScreenshot', parameters)).data };
   }
+  if (action === 'click' || action === 'hover') {
+    const point = await elementPoint(tabId, args); assertActive(signal);
+    const metrics = await cdp(tabId, 'Page.getLayoutMetrics'), viewport = metrics.cssVisualViewport || metrics.visualViewport;
+    if (point.x < 0 || point.y < 0 || point.x >= viewport.clientWidth || point.y >= viewport.clientHeight) fail('OUTSIDE_VIEWPORT', 'The target is outside the viewport. Scroll and take a new screenshot.');
+    await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
+    if (action === 'click') {
+      await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point });
+      await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
+    }
+    return { performed: action, ...point };
+  }
+  if (action === 'type') {
+    if (typeof args.text !== 'string') fail('INVALID_ARGUMENT', 'text must be a string.');
+    await dom(tabId, 'prepare', { ...args, focus: true, editable: true }); assertActive(signal);
+    if (args.clear !== false) { await keyPress(tabId, 'a', ['Control']); await keyPress(tabId, 'Backspace'); }
+    await cdp(tabId, 'Input.insertText', { text: args.text });
+    return { typed: true, characters: args.text.length };
+  }
+  if (action === 'press') { await keyPress(tabId, args.key, args.modifiers); return { pressed: args.key }; }
+  if (action === 'scroll') {
+    await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x: boundedNumber(args.x, 1, 0, 100000, 'x'), y: boundedNumber(args.y, 1, 0, 100000, 'y'), deltaX: boundedNumber(args.deltaX, 0, -100000, 100000, 'deltaX'), deltaY: boundedNumber(args.deltaY, 600, -100000, 100000, 'deltaY') });
+    return { scrolled: true };
+  }
+  if (action === 'select') {
+    if (!Array.isArray(args.values) || !args.values.every(value => typeof value === 'string')) fail('INVALID_ARGUMENT', 'values must be an array of strings.');
+    return (await dom(tabId, 'select', args)).value;
+  }
+  if (action === 'wait') {
+    const timeoutMs = boundedNumber(args.timeoutMs, 10000, 0, 60000, 'timeoutMs'), state = args.state || 'visible', started = Date.now();
+    if (!['visible', 'hidden', 'attached'].includes(state)) fail('INVALID_ARGUMENT', 'Unknown wait state.');
+    if (!args.ref && !args.selector && typeof args.text !== 'string') fail('INVALID_ARGUMENT', 'Provide a ref, selector, or text.');
+    do {
+      assertActive(signal);
+      try { if ((await dom(tabId, 'wait', { ...args, state })).value.matched) return { matched: true, elapsedMs: Date.now() - started }; }
+      catch (error) { if (error.code || !/context|navigat/i.test(error.message)) throw error; }
+      if (Date.now() - started >= timeoutMs) break;
+      await delay(Math.min(100, timeoutMs - (Date.now() - started)), signal);
+    } while (true);
+    fail('WAIT_TIMEOUT', `Condition was not met within ${timeoutMs} ms.`);
+  }
+  if (action === 'upload') {
+    if (!Array.isArray(args.files) || !args.files.length || !args.files.every(file => typeof file === 'string' && /^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(file))) fail('INVALID_ARGUMENT', 'files must contain absolute local paths.');
+    const { value: objectId, context } = await dom(tabId, 'file', { ...args, fileCount: args.files.length }, false);
+    try { await cdp(tabId, 'DOM.setFileInputFiles', { objectId, files: args.files }, context.sessionId); }
+    finally { await cdp(tabId, 'Runtime.releaseObject', { objectId }, context.sessionId).catch(() => {}); }
+    return { selected: args.files.length };
+  }
+  if (action === 'download') {
+    const url = allowedURL(args.url), filename = downloadFilename(args.filename);
+    if (url === 'about:blank') fail('INVALID_ARGUMENT', 'A download requires an http(s) URL.');
+    const id = await chrome.downloads.download({ url, ...(filename ? { filename } : {}), conflictAction: 'uniquify', saveAs: false });
+    downloads.set(id, { sessionId: session.id, tabId, createdAt: Date.now() }); await saveSession();
+    return { id, started: true };
+  }
+  if (action === 'downloads') {
+    const items = [];
+    for (const [id, owner] of downloads) if (owner.tabId === tabId && owner.sessionId === session.id) {
+      const [item] = await chrome.downloads.search({ id });
+      if (item) items.push({ id: item.id, url: item.url, filename: item.filename, state: item.state, error: item.error, bytesReceived: item.bytesReceived, totalBytes: item.totalBytes, exists: item.exists });
+    }
+    return { downloads: items, scope: 'Only downloads started by this session’s download tool.' };
+  }
+  if (action === 'dialog') {
+    if (typeof args.accept !== 'boolean') fail('INVALID_ARGUMENT', 'accept must be a boolean.');
+    await cdp(tabId, 'Page.handleJavaScriptDialog', { accept: args.accept, ...(args.promptText !== undefined ? { promptText: String(args.promptText) } : {}) });
+    dialogs.delete(tabId); return { handled: true };
+  }
+  if (action === 'evaluate') {
+    if (typeof args.expression !== 'string' || !args.expression.trim()) fail('INVALID_ARGUMENT', 'expression must be a JavaScript expression.');
+    const context = await frameContext(tabId, args), main = contexts.get(tabId)?.get(`${context.sessionId || ''}:${context.id}`);
+    if (!main) fail('FRAME_UNAVAILABLE', 'The frame main-world context is unavailable. Retry after navigation settles.');
+    const result = unwrapEvaluation(await cdp(tabId, 'Runtime.evaluate', { expression: args.expression, contextId: main, returnByValue: true, awaitPromise: true, timeout: 10000 }, context.sessionId));
+    return { value: result.value ?? result.unserializableValue ?? null, type: result.type };
+  }
+  fail('UNKNOWN_ACTION', `Unsupported browser action: ${action}`);
 }
 
-// Handle messages from popup UI
-chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
-  if (req.type === "get_status") {
-    sendResponse({
-      connected: isConnected,
-      wsUrl: WS_URL,
-      browser: getBrowserInfo(),
-      attachedCount: attachedTabs.size,
-      attachedTabs: Array.from(attachedTabs)
-    });
-  } else if (req.type === "reconnect") {
-    connectWebSocket();
-    sendResponse({ success: true });
-  }
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (method === 'Target.attachedToTarget' && params.targetInfo.type === 'iframe') {
+    const children = childSessions.get(source.tabId) || new Map(); children.set(params.sessionId, params.targetInfo.targetId); childSessions.set(source.tabId, children);
+    void cdp(source.tabId, 'Page.enable', {}, params.sessionId).catch(() => {});
+    void cdp(source.tabId, 'Runtime.enable', {}, params.sessionId).catch(() => {});
+    void enableChildren(source.tabId, params.sessionId);
+  } else if (method === 'Target.detachedFromTarget') childSessions.get(source.tabId)?.delete(params.sessionId);
+  else if (method === 'Runtime.executionContextCreated' && params.context.auxData?.isDefault) {
+    const map = contexts.get(source.tabId) || new Map(); map.set(`${source.sessionId || ''}:${params.context.auxData.frameId}`, params.context.id); contexts.set(source.tabId, map);
+  } else if (method === 'Runtime.executionContextDestroyed') {
+    for (const [key, value] of contexts.get(source.tabId) || []) if (key.startsWith(`${source.sessionId || ''}:`) && value === params.executionContextId) contexts.get(source.tabId).delete(key);
+  } else if (method === 'Runtime.executionContextsCleared') {
+    for (const key of contexts.get(source.tabId)?.keys() || []) if (key.startsWith(`${source.sessionId || ''}:`)) contexts.get(source.tabId).delete(key);
+  } else if (method === 'Page.frameNavigated') {
+    const tabRefs = refs.get(source.tabId); for (const [key, value] of tabRefs || []) if (value.frameId === params.frame.id) tabRefs.delete(key);
+  } else if (method === 'Page.javascriptDialogOpening') dialogs.set(source.tabId, { type: params.type, message: params.message });
+  else if (method === 'Page.javascriptDialogClosed') dialogs.delete(source.tabId);
+});
+chrome.debugger.onDetach.addListener((source, reason) => {
+  attached.delete(source.tabId); refs.delete(source.tabId); childSessions.delete(source.tabId); contexts.delete(source.tabId);
+  if (intentionalDetach.delete(source.tabId)) return;
+  owners.delete(source.tabId); void chrome.tabs.ungroup(source.tabId).catch(() => {}); void saveSession();
+  publishEvent({ type: 'event', event: 'detached', tabId: source.tabId, reason });
+});
+chrome.tabs.onRemoved.addListener(tabId => {
+  owners.delete(tabId); attached.delete(tabId); refs.delete(tabId); childSessions.delete(tabId); contexts.delete(tabId); dialogs.delete(tabId); void saveSession();
+  publishEvent({ type: 'event', event: 'tab_closed', tabId });
+});
+chrome.runtime.onMessage.addListener((request, sender, respond) => {
+  if (sender.id !== chrome.runtime.id || sender.tab) return false;
+  void (async () => {
+    await initialize();
+    if (request.type === 'status') return { connected, instanceId, port: config.port, enabled: config.enabled, paired: !!config.token, status: statusMessage, tabs: [...owners].map(([tabId, owner]) => ({ tabId, ...owner })), dialogs: [...dialogs].map(([tabId, dialog]) => ({ tabId, ...dialog })) };
+    if (request.type === 'configure') {
+      const next = validateConfig({ port: request.port, token: request.token || config.token, enabled: true });
+      if (!next.token) fail('INVALID_ARGUMENT', 'Paste the pairing token first.');
+      for (const controller of controllers.values()) controller.abort();
+      for (const id of [...owners.keys()]) { await releaseTab(id); publishEvent({ type: 'event', event: 'detached', tabId: id, reason: 'user_reconfigured' }); }
+      config = next; await chrome.storage.local.set({ config }); connected = false; socket?.close(); socket = null; await connect(); return { saved: true };
+    }
+    if (request.type === 'release_all') {
+      for (const controller of controllers.values()) controller.abort();
+      for (const id of [...owners.keys()]) { await releaseTab(id); publishEvent({ type: 'event', event: 'detached', tabId: id, reason: 'user_released' }); }
+      config.enabled = false; await chrome.storage.local.set({ config }); connected = false;
+      clearTimeout(reconnectTimer); clearInterval(heartbeatTimer); socket?.close(); socket = null;
+      statusMessage = 'Paused. All tabs have been released.'; badge(); return { released: true };
+    }
+    fail('UNKNOWN_ACTION', 'Unknown popup request.');
+  })().then(result => respond({ ok: true, result }), error => respond({ ok: false, error: commandError(error) }));
   return true;
 });
-
-// Automatically clean up when tabs are closed
-chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
-  attachedTabs.delete(tabId);
-  if (agentOpenedTabs.has(tabId)) {
-    agentOpenedTabs.delete(tabId);
-  }
-  await checkAndCleanupGeminiGroup(removeInfo?.windowId);
-});
-
-// Start connection on launch and clean up any orphaned groups
-checkAndCleanupGeminiGroup();
-connectWebSocket();
+chrome.alarms.create('bridge-reconnect', { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'bridge-reconnect') void connect().catch(connectionError); });
+chrome.runtime.onStartup.addListener(() => void connect().catch(connectionError));
+void connect().catch(connectionError);
