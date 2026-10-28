@@ -3,8 +3,18 @@ param([switch]$HideToken)
 $ErrorActionPreference = 'Stop'
 $bridgeRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $installedRoot = Join-Path $env:USERPROFILE '.gemini\config\plugins\browser-bridge'
+foreach ($root in @($bridgeRoot, $installedRoot)) {
+    $localConfigPath = Join-Path $root 'mcp_config.json'
+    if (-not (Test-Path -LiteralPath $localConfigPath)) { continue }
+    $serverEnv = (Get-Content -LiteralPath $localConfigPath -Raw | ConvertFrom-Json).mcpServers.'browser-bridge'.env
+    foreach ($key in @('BROWSER_BRIDGE_DATA_DIR', 'BROWSER_BRIDGE_PORT')) {
+        if (-not [Environment]::GetEnvironmentVariable($key) -and $serverEnv.$key) {
+            [Environment]::SetEnvironmentVariable($key, [string]$serverEnv.$key, 'Process')
+        }
+    }
+}
 $port = if ($env:BROWSER_BRIDGE_PORT) { [int]$env:BROWSER_BRIDGE_PORT } else { 9224 }
-$dataDirectory = if ($env:BROWSER_BRIDGE_DATA_DIR) { [IO.Path]::GetFullPath($env:BROWSER_BRIDGE_DATA_DIR) } else { Join-Path $env:LOCALAPPDATA 'BrowserBridge' }
+$dataDirectory = if ($env:BROWSER_BRIDGE_DATA_DIR) { [IO.Path]::GetFullPath($env:BROWSER_BRIDGE_DATA_DIR) } else { Join-Path $env:USERPROFILE '.browser-bridge' }
 if ($port -lt 1024 -or $port -gt 65535) { throw 'The bridge port must be between 1024 and 65535.' }
 $nodeCandidates = @((Join-Path $env:USERPROFILE '.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe'))
 $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
@@ -16,7 +26,7 @@ if (-not (Test-Path -LiteralPath $cliPath)) { throw 'Bundled runtime is missing.
 
 # Only the exact entry point of this project or its installed copy may be stopped.
 $knownEntries = @()
-foreach ($root in @($bridgeRoot, $installedRoot)) {
+foreach ($root in @($bridgeRoot, $installedRoot, (Join-Path $env:USERPROFILE '.dsh\profiles\desktop\node_modules\dsh-browser-bridge'))) {
     foreach ($relative in @('runtime\service.mjs', 'core\service.mjs', 'server\server.py')) {
         $knownEntries += [IO.Path]::GetFullPath((Join-Path $root $relative))
     }
@@ -36,7 +46,7 @@ foreach ($processId in @($listeners.OwningProcess | Sort-Object -Unique)) {
     $processesToStop += $owner
 }
 
-# Keep App and agy on the same data directory. Preserve other server settings.
+# Keep the App on the same data directory as the native DSH plugin and CLI.
 $mcpPath = Join-Path $installedRoot 'mcp_config.json'
 if (Test-Path -LiteralPath $mcpPath) {
     $configuration = Get-Content -LiteralPath $mcpPath -Raw | ConvertFrom-Json
@@ -46,7 +56,7 @@ if (Test-Path -LiteralPath $mcpPath) {
     $entry.env | Add-Member -NotePropertyName BROWSER_BRIDGE_PORT -NotePropertyValue ([string]$port) -Force
     $entry.env | Add-Member -NotePropertyName BROWSER_BRIDGE_DATA_DIR -NotePropertyValue $dataDirectory -Force
     $entry.command = $nodePath
-    $backupDirectory = Join-Path $env:LOCALAPPDATA 'BrowserBridge\config-backups'
+    $backupDirectory = Join-Path $dataDirectory 'config-backups'
     New-Item -ItemType Directory -Path $backupDirectory -Force | Out-Null
     Copy-Item -LiteralPath $mcpPath -Destination (Join-Path $backupDirectory ('mcp-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '.json'))
     [IO.File]::WriteAllText($mcpPath, ($configuration | ConvertTo-Json -Depth 30), [Text.UTF8Encoding]::new($false))

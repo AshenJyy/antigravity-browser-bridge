@@ -1,30 +1,30 @@
 # 安装 Browser Bridge 2.0
 
-本版针对 **DeepSeek Harness Desktop v0.2.1-rc.3、Antigravity App，以及 DSH Antigravity 子代理实际调用的 `agy`**。不包含 IDE 接入。v2.0.0 已实现并打包，尚未运行自动化测试或双宿主端到端验收。
+本版针对 **DeepSeek Harness Desktop v0.2.1-rc.3 和 Antigravity App**。两端独立调用浏览器工具，通过同一扩展操作日常 Edge 的标签页和登录状态。v2.0.1 已实现并打包，按要求未运行测试或双宿主端到端验收。
 
 ## 1. 安装 DSH 插件
 
-从 [v2.0.0 发布页](https://github.com/AshenJyy/antigravity-browser-bridge/releases/tag/v2.0.0) 下载 `dsh-browser-bridge-2.0.0.tgz`，在 DSH Desktop 的插件管理界面中添加本地包，然后重启相关工作配置/服务。该包使用官方 npm bundle 格式：`package.json` 的 `dsh.bundle.patch`、`cordis.patch.yml`、原生工具入口和 `engines.dsh` 版本约束。安装包通过 GitHub Releases 分发，尚未发布到 npm。
+从 [v2.0.1 发布页](https://github.com/AshenJyy/antigravity-browser-bridge/releases/tag/v2.0.1) 下载 `dsh-browser-bridge-2.0.1.tgz`，在 DSH Desktop 的插件管理界面中添加本地包，然后重启相关工作配置/服务。该包使用官方 npm bundle 格式：`package.json` 的 `dsh.bundle.patch`、`cordis.patch.yml`、原生工具入口和 `engines.dsh` 版本约束。安装包通过 GitHub Releases 分发，尚未发布到 npm。
 
-DSH 原生模型将获得 `browser_*` 工具；截图通过 DSH 官方附件接口作为图像返回。所选模型本身需要支持图像。安装 DSH 插件不会自动把工具传给外部 `agy` 进程。
+DSH 当前对话直接获得 `browser_*` 工具；截图通过 DSH 官方附件接口作为图像返回。所选模型本身需要支持图像。无需安装或调用其他应用的子代理。DSH 会从其运行时提供 `@deepseek-ai/dsh-mcp-client` 等 peer 依赖。
 
-## 2. 安装 Antigravity App 与 agy 插件
+## 2. 安装 Antigravity App 插件
 
-解压 `browser-bridge-antigravity-2.0.0.zip`。在解压出的 `browser-bridge` 目录中执行：
+解压 `browser-bridge-antigravity-2.0.1.zip`。在解压出的 `browser-bridge` 目录中执行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-Antigravity.ps1
 ```
 
-脚本找到 Node.js 22+（优先 PATH，其次 DSH 自带运行时），将插件放入 `%USERPROFILE%\.gemini\config\plugins\browser-bridge`；已有插件目录会先备份到插件扫描目录之外。随后读取 `agy plugin list --json`：若 agy 已发现同一路径，直接启用；否则先执行 `agy plugin install`，再启用并列出插件。脚本不运行测试，不修改其他 MCP 配置或 DSH 的 provider/模型设置。
+脚本找到 Node.js 22+（优先 DSH 自带运行时，其次 PATH），将插件放入 App 官方全局目录 `%USERPROFILE%\.gemini\config\plugins\browser-bridge`，写入 Node 路径、端口与共享状态目录。已有插件目录会先备份到插件扫描目录之外。安装完成后重启 Antigravity App。
 
-若实际子代理指定了其他 `agy`，请明确使用相同的可执行文件：
+可指定 Node 与共享配置；若更改端口或状态目录，请同时在 DSH 的 Browser Bridge 插件配置中设置相同的 `port` 和 `dataDir`：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-Antigravity.ps1 -AgyPath 'D:\tools\agy.exe' -NodePath 'D:\tools\node.exe'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-Antigravity.ps1 -NodePath 'D:\tools\node.exe' -DataDirectory 'D:\BrowserBridgeState' -Port 9224
 ```
 
-App 与 `agy` 可以发现同一个全局插件目录；具体注册位置取决于版本和配置，脚本按 agy 返回的实际路径处理。安装后重启 App，并开启新的 DSH Antigravity 子代理会话。若 App 的插件自动发现受版本或配置限制，可在 App 的 MCP 设置中添加本地服务：command 使用 Node 可执行文件的绝对路径，args 使用安装目录下 `runtime\mcp.mjs` 的绝对路径；不要把 `${PLUGIN_ROOT}` 原样写入普通全局 MCP 配置，该变量仅在插件上下文展开。避免同一宿主同时启用重复 MCP 服务。
+若 App 的插件自动发现受版本或配置限制，可在 App 的 MCP 设置中添加本地服务：command 使用 Node 可执行文件的绝对路径，args 使用安装目录下 `runtime\mcp.mjs` 的绝对路径；不要把 `${PLUGIN_ROOT}` 原样写入普通全局 MCP 配置，该变量仅在插件上下文展开。避免同一宿主同时启用重复 MCP 服务。
 
 ## 3. 在日常 Edge 中加载扩展并配对
 
@@ -38,7 +38,9 @@ App 与 `agy` 可以发现同一个全局插件目录；具体注册位置取决
 
 4. 将输出的 token 和连接端口填入 Edge 扩展弹窗并连接。配对 token 只在本机使用，勿发到聊天或网页。
 
-两端默认共用 `%LOCALAPPDATA%\BrowserBridge` 的服务状态和 token，以及 `127.0.0.1:9224`。首次工具调用会隐藏启动后台服务，不需要常驻终端。多个 Edge 配置各自加载扩展、使用同一 token；实例 ID 会独立保存。
+两端默认共用 `%USERPROFILE%\.browser-bridge` 的服务状态和 token，以及 `127.0.0.1:9224`。此目录避开 Windows 打包应用的 AppData 路径重定向。首次工具调用会隐藏启动后台服务，不需要常驻终端。多个 Edge 配置各自加载扩展、使用同一 token；实例 ID 会独立保存。
+
+从 2.0.0 升级时，先升级 DSH 插件并重跑 App 安装器，再执行下面的配对修复。新默认目录没有令牌时会迁移当前环境可见的 `%LOCALAPPDATA%\BrowserBridge\token`，旧文件保留；新令牌已存在时不会覆盖。若过去不同环境生成过不同令牌，以新统一目录为准，将其在扩展中更新一次即可。
 
 正常只需配对一次。重启电脑、Edge 或宿主后会使用已保存的令牌重连；清除扩展数据、更换浏览器配置或更换服务端令牌后才需要重新配对。
 
@@ -48,7 +50,7 @@ App 与 `agy` 可以发现同一个全局插件目录；具体注册位置取决
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Repair-Pairing.ps1
 ```
 
-它保留现有令牌，只停止入口路径明确属于本项目或已安装副本的旧桥接进程，再以相同数据目录启动新版并显示令牌。遇到无关进程占用端口时会停止并报出进程信息，不会结束该进程。此操作会中断现有 Browser Bridge 会话；更新 MCP 连接配置后重启 App／新开 agy 会话。
+它保留现有令牌，只停止入口路径明确属于本项目、App 安装目录或 DSH desktop 配置中本插件的旧桥接进程，再启动新版并显示令牌。遇到无关进程占用端口时会报错并退出。此操作会中断现有 Browser Bridge 会话；更新后重启 DSH 和 Antigravity App。自定义状态目录或端口时，先设置相同的 `BROWSER_BRIDGE_DATA_DIR` 和 `BROWSER_BRIDGE_PORT` 环境变量再执行配对命令。
 
 ## 使用
 
@@ -69,7 +71,7 @@ DSH 按 Agent/Session 分开归属，Antigravity 按 MCP 进程分开归属；�
 
 ## 范围与限制
 
-- 读网页、快照、真实标签截图、点击/悬停/输入/键盘/滚动/下拉选择、导航、等待、文件输入上传、发起下载和 JavaScript 对话框均已实现，v2.0.0 尚未运行功能测试。
+- 读网页、快照、真实标签截图、点击/悬停/输入/键盘/滚动/下拉选择、导航、等待、文件输入上传、发起下载和 JavaScript 对话框均已实现，v2.0.1 尚未运行功能测试。
 - Edge 内部页、扩展商店保护页及浏览器原生 UI 受 Chromium 限制；本工具不是整个 Windows 桌面的操控工具。
 - 扩展要求 Edge 125+。快照一次读取一个 frame，返回 frame 列表后可明确选择；支持开放 Shadow DOM，封闭 Shadow DOM 不在当前范围。无法可靠换算坐标的变换 iframe 会返回错误。
 - 高级 evaluate 若直接触发同步 JavaScript 对话框，可能阻塞求值；此类场景优先正常点击后调用 dialog。
@@ -82,6 +84,6 @@ DSH 按 Agent/Session 分开归属，Antigravity 按 MCP 进程分开归属；�
 ## 来源
 
 - [DSH rc.3 官方插件格式](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.3/docs/user/develop/basic/publish.md)
-- [Antigravity 插件与 App/CLI 安装](https://antigravity.google/docs/plugins)
+- [Antigravity App 插件安装](https://antigravity.google/docs/plugins)
 - [Antigravity MCP](https://antigravity.google/docs/mcp)
 - [Edge 扩展旁加载](https://learn.microsoft.com/en-us/microsoft-edge/extensions/getting-started/extension-sideloading)

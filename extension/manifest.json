@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Browser Bridge",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "minimum_chrome_version": "125",
   "description": "Connect DSH and Antigravity to your existing Microsoft Edge tabs through an authenticated local bridge.",
   "permissions": [

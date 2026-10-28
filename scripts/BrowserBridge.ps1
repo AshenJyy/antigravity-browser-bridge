@@ -2,6 +2,16 @@
 param([Parameter(ValueFromRemainingArguments = $true)][string[]]$BridgeArguments = @('status'))
 $ErrorActionPreference = 'Stop'
 $bridgeRoot = Split-Path -Parent $PSScriptRoot
+# Use the same overrides as this installed App plugin when called from a shell.
+$localConfigPath = Join-Path $bridgeRoot 'mcp_config.json'
+if (Test-Path -LiteralPath $localConfigPath) {
+    $serverEnv = (Get-Content -LiteralPath $localConfigPath -Raw | ConvertFrom-Json).mcpServers.'browser-bridge'.env
+    foreach ($key in @('BROWSER_BRIDGE_DATA_DIR', 'BROWSER_BRIDGE_PORT')) {
+        if (-not [Environment]::GetEnvironmentVariable($key) -and $serverEnv.$key) {
+            [Environment]::SetEnvironmentVariable($key, [string]$serverEnv.$key, 'Process')
+        }
+    }
+}
 $candidates = @((Join-Path $env:USERPROFILE '.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe'))
 $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
 if ($nodeCommand) { $candidates += $nodeCommand.Source }

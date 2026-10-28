@@ -5,7 +5,9 @@ description: Inspect and control the user's real Microsoft Edge browser through 
 
 # Browser Bridge
 
-Use the available `browser_*` tools (MCP hosts may add their own namespace). Both DSH and Antigravity use the same arguments. DSH isolates by agent/session; Antigravity isolates by MCP process. A DSH parent and its external Antigravity child have separate browser sessions. Whether separate App chats receive separate MCP processes is controlled by the host; do not assume that they do.
+Use the available `browser_*` tools directly (MCP hosts may add their own namespace). In DSH these are native tools provided by the installed Browser Bridge plugin; in Antigravity App they are provided by the plugin's MCP server. Handle browser tasks in the current agent using these tools, without delegating to another application or child agent. Both hosts use the same arguments and the user's existing Edge extension and login state. Do not launch a separate browser profile for Browser Bridge tasks.
+
+DSH isolates by agent/session; Antigravity isolates by MCP process. Whether separate App chats receive separate MCP processes is controlled by the host; do not assume that they do.
 
 ## Start and choose a tab
 

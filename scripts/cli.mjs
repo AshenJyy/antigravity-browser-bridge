@@ -2,8 +2,9 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { BridgeClient, ensureDaemon, getSettings, readToken } from '../core/client.mjs';
+import { VERSION } from '../core/settings.mjs';
 
-const help = `Browser Bridge 2.0 — Edge / DSH / Antigravity App / agy
+const help = `Browser Bridge ${VERSION} — Edge / DSH Desktop / Antigravity App
 
   browser-bridge status                         Start/check the shared daemon
   browser-bridge pair                           Show the local pairing token

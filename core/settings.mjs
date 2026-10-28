@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 import { mkdir, open, readFile, lstat } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 
-export const VERSION = '2.0.0';
+export const VERSION = '2.0.1';
 export const PROTOCOL = 2;
 
 export class BridgeError extends Error {
@@ -18,7 +18,9 @@ export class BridgeError extends Error {
 
 export function getSettings(overrides = {}) {
   const defaultDir = platform() === 'win32'
-    ? join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'BrowserBridge')
+    // Packaged Windows hosts can see different redirected AppData directories.
+    // Keep the default identity outside AppData so Desktop, App and shells agree.
+    ? join(homedir(), '.browser-bridge')
     : platform() === 'darwin' ? join(homedir(), 'Library', 'Application Support', 'BrowserBridge')
       : join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'browser-bridge');
   const port = Number(overrides.port ?? process.env.BROWSER_BRIDGE_PORT ?? 9224);
@@ -33,7 +35,7 @@ export async function readToken(settings = getSettings()) {
   let file;
   try {
     file = await open(settings.tokenPath, 'wx', 0o600);
-    const token = randomBytes(32).toString('hex');
+    const token = await legacyWindowsToken(settings) || randomBytes(32).toString('hex');
     await file.writeFile(token + '\n', 'utf8');
     await file.sync();
     return token;
@@ -50,4 +52,16 @@ export async function readToken(settings = getSettings()) {
     await new Promise(resolveDelay => setTimeout(resolveDelay, 20));
   }
   throw new BridgeError('INVALID_TOKEN_FILE', 'The bridge token file was not initialized.');
+}
+
+/** Migrate the old default once; an explicit custom data directory stays independent. */
+async function legacyWindowsToken(settings) {
+  if (platform() !== 'win32' || settings.dataDir.toLowerCase() !== resolve(homedir(), '.browser-bridge').toLowerCase()) return;
+  const legacyPath = join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'BrowserBridge', 'token');
+  try {
+    const info = await lstat(legacyPath);
+    if (!info.isFile() || info.isSymbolicLink()) return;
+    const token = (await readFile(legacyPath, 'utf8')).trim();
+    if (/^[a-f0-9]{64}$/.test(token)) return token;
+  } catch (error) { if (error.code !== 'ENOENT') throw error; }
 }

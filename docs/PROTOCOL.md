@@ -1,6 +1,6 @@
 # Browser Bridge protocol v2
 
-All control stays on `127.0.0.1:9224` (configurable through `BROWSER_BRIDGE_PORT`). HTTP requires `Authorization: Bearer <token>` except a minimal `GET /health`. User state defaults to the platform's user-local BrowserBridge directory; `BROWSER_BRIDGE_DATA_DIR` overrides it. Persist an installation token in `token` using exclusive creation. Never log the token. HTTP requests with an Origin header are rejected; the extension uses WebSocket.
+All control stays on `127.0.0.1:9224` (configurable through `BROWSER_BRIDGE_PORT`). HTTP requires `Authorization: Bearer <token>` except a minimal `GET /health`. Windows state defaults to `%USERPROFILE%\.browser-bridge`, outside packaged-app AppData redirection; macOS/Linux use their platform user-local state directories. `BROWSER_BRIDGE_DATA_DIR` overrides it. DSH also exposes `port` and `dataDir` in its native plugin configuration. Both hosts must use the same state and port. The Windows default imports a valid legacy `%LOCALAPPDATA%\BrowserBridge\token` only when creating the new token file. Persist the token using exclusive creation and never log it. HTTP requests with an Origin header are rejected; the extension uses WebSocket.
 
 ## Host API
 
@@ -16,7 +16,7 @@ Common tab args: `{tab, ...}`. Targets use `{ref}` from a snapshot, or `{selecto
 
 ## Extension transport
 
-Connect `ws://127.0.0.1:9224/extension`. Browser Origin must be `chrome-extension://<id>`; non-browser test clients may omit Origin. First message within 5s: `{type:'hello',protocol:2,token,instanceId,browser:'Microsoft Edge',version:'2.0.0'}`. The persistent instanceId is a UUID stored in extension local storage. Reply `{type:'welcome',protocol:2,daemonId}` or close. daemonId is unique per daemon run; a changed value invalidates extension ownership mirrors. A newer authenticated connection replaces only the same instanceId. Old pending commands fail; replies must belong to their originating socket.
+Connect `ws://127.0.0.1:9224/extension`. Browser Origin must be `chrome-extension://<id>`; non-browser test clients may omit Origin. First message within 5s: `{type:'hello',protocol:2,token,instanceId,browser:'Microsoft Edge',version:'2.0.1'}`. The persistent instanceId is a UUID stored in extension local storage. Reply `{type:'welcome',protocol:2,daemonId}` or close. daemonId is unique per daemon run; a changed value invalidates extension ownership mirrors. A newer authenticated connection replaces only the same instanceId. Old pending commands fail; replies must belong to their originating socket.
 
 Daemon sends `{type:'command',id,action,tabId?,args,session:{id,client,label?}}`. Extension replies `{type:'result',id,ok:true,result}` or `{type:'result',id,ok:false,error:{code,message}}`. Daemon can send `{type:'cancel',id}`. Ping/pong JSON messages keep the MV3 service worker alive. Extension serializes tab actions and honors cancellation during waits; daemon also serializes operations and checks ownership when executing the queue.
 

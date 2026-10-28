@@ -8,7 +8,11 @@ import { DshSessions } from './dsh-sessions.mjs';
 
 export const name = 'browser-bridge';
 export const inject = ['tools', 'skills'];
-export const Config = z.object({ autoStart: z.boolean().default(true) });
+export const Config = z.object({
+  autoStart: z.boolean().default(true),
+  port: z.number().min(1024).max(65535).description('Shared bridge port; leave unset to use BROWSER_BRIDGE_PORT or 9224.'),
+  dataDir: z.string().description('Shared Browser Bridge state directory; leave empty to use the platform default.'),
+});
 
 function registerSkill(ctx) {
   const path = fileURLToPath(new URL('../skills/browser-bridge/SKILL.md', import.meta.url));
@@ -26,7 +30,10 @@ function registerSkill(ctx) {
 }
 
 export function apply(ctx, config = {}) {
-  const sessions = new DshSessions(options => new BridgeClient({ ...options, autoStart: config.autoStart !== false }));
+  const sessions = new DshSessions(options => new BridgeClient({
+    ...options, autoStart: config.autoStart !== false,
+    settings: { port: config.port, dataDir: config.dataDir },
+  }));
   registerBrowserTools(ctx, sessions);
   registerSkill(ctx);
   ctx.on('agent/disposed', ({ agent }) => sessions.releaseAgent(agent).catch(() => {
