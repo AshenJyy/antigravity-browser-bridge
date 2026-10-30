@@ -1,13 +1,13 @@
 {
   "name": "dsh-browser-bridge",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Native Edge browser tools for DeepSeek Harness Desktop and Antigravity App",
   "type": "module",
   "license": "Apache-2.0",
   "main": "adapters/dsh.mjs",
   "exports": { ".": "./adapters/dsh.mjs", "./package.json": "./package.json", "./cordis.patch.yml": "./cordis.patch.yml" },
   "bin": { "browser-bridge": "scripts/cli.mjs" },
-  "engines": { "node": ">=22", "dsh": "0.2.1-rc.3" },
+  "engines": { "node": ">=22", "dsh": ">=0.2.1-rc.3 <=0.2.1" },
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
   "keywords": ["dsh-plugin", "browser-bridge", "edge", "antigravity", "mcp"],
   "files": ["adapters/", "core/", "extension/", "runtime/", "scripts/", "skills/", "docs/", "cordis.patch.yml", "plugin.json", "mcp_config.json", "README.md", "LICENSE"],
@@ -19,6 +19,6 @@
     "pack:release": "py scripts/package_release.py"
   },
   "dependencies": { "@modelcontextprotocol/sdk": "1.32.2", "ws": "8.22.0" },
-  "peerDependencies": { "@deepseek-ai/dsh-mcp-client": "0.2.1-rc.3", "@deepseek-ai/schemastery": "~3.18.5" },
+  "peerDependencies": { "@deepseek-ai/dsh-mcp-client": ">=0.2.1-rc.3 <=0.2.1", "@deepseek-ai/schemastery": "~3.18.5" },
   "devDependencies": { "@deepseek-ai/dsh-mcp-client": "0.2.1-rc.3", "@deepseek-ai/schemastery": "~3.18.5", "esbuild": "0.25.12" }
 }

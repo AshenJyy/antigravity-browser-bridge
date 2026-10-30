@@ -1,16 +1,16 @@
 # 安装 Browser Bridge 2.0
 
-本版针对 **DeepSeek Harness Desktop v0.2.1-rc.3 和 Antigravity App**。两端独立调用浏览器工具，通过同一扩展操作日常 Edge 的标签页和登录状态。v2.0.1 已实现并打包，按要求未运行测试或双宿主端到端验收。
+本版用于 **DeepSeek Harness Desktop 和 Antigravity App**。DSH 宿主与 `@deepseek-ai/dsh-mcp-client` peer 依赖均声明 `>=0.2.1-rc.3 <=0.2.1`，允许 rc.3 及后续 `0.2.1-rc.*` 和 `0.2.1` 正式版，无需逐个登记版本；不包含 `0.2.2` 及其他版本。两端独立调用浏览器工具，通过同一扩展操作日常 Edge 的标签页和登录状态。v2.0.2 已实现并打包，按要求未运行测试、逐版本验证或双宿主端到端验收。
 
 ## 1. 安装 DSH 插件
 
-从 [v2.0.1 发布页](https://github.com/AshenJyy/antigravity-browser-bridge/releases/tag/v2.0.1) 下载 `dsh-browser-bridge-2.0.1.tgz`，在 DSH Desktop 的插件管理界面中添加本地包，然后重启相关工作配置/服务。该包使用官方 npm bundle 格式：`package.json` 的 `dsh.bundle.patch`、`cordis.patch.yml`、原生工具入口和 `engines.dsh` 版本约束。安装包通过 GitHub Releases 分发，尚未发布到 npm。
+从 [v2.0.2 发布页](https://github.com/AshenJyy/browser-bridge/releases/tag/v2.0.2) 下载 `dsh-browser-bridge-2.0.2.tgz`，在 DSH Desktop 的插件管理界面中添加本地包，然后重启相关工作配置/服务。该包使用官方 npm bundle 格式：`package.json` 的 `dsh.bundle.patch`、`cordis.patch.yml`、原生工具入口和 `engines.dsh` 版本约束。安装包通过 GitHub Releases 分发，尚未发布到 npm。
 
 DSH 当前对话直接获得 `browser_*` 工具；截图通过 DSH 官方附件接口作为图像返回。所选模型本身需要支持图像。无需安装或调用其他应用的子代理。DSH 会从其运行时提供 `@deepseek-ai/dsh-mcp-client` 等 peer 依赖。
 
 ## 2. 安装 Antigravity App 插件
 
-解压 `browser-bridge-antigravity-2.0.1.zip`。在解压出的 `browser-bridge` 目录中执行：
+解压 `browser-bridge-antigravity-2.0.2.zip`。在解压出的 `browser-bridge` 目录中执行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-Antigravity.ps1
@@ -71,7 +71,7 @@ DSH 按 Agent/Session 分开归属，Antigravity 按 MCP 进程分开归属；�
 
 ## 范围与限制
 
-- 读网页、快照、真实标签截图、点击/悬停/输入/键盘/滚动/下拉选择、导航、等待、文件输入上传、发起下载和 JavaScript 对话框均已实现，v2.0.1 尚未运行功能测试。
+- 读网页、快照、真实标签截图、点击/悬停/输入/键盘/滚动/下拉选择、导航、等待、文件输入上传、发起下载和 JavaScript 对话框均已实现，v2.0.2 尚未运行功能测试。
 - Edge 内部页、扩展商店保护页及浏览器原生 UI 受 Chromium 限制；本工具不是整个 Windows 桌面的操控工具。
 - 扩展要求 Edge 125+。快照一次读取一个 frame，返回 frame 列表后可明确选择；支持开放 Shadow DOM，封闭 Shadow DOM 不在当前范围。无法可靠换算坐标的变换 iframe 会返回错误。
 - 高级 evaluate 若直接触发同步 JavaScript 对话框，可能阻塞求值；此类场景优先正常点击后调用 dialog。

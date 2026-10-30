@@ -16,7 +16,7 @@ Common tab args: `{tab, ...}`. Targets use `{ref}` from a snapshot, or `{selecto
 
 ## Extension transport
 
-Connect `ws://127.0.0.1:9224/extension`. Browser Origin must be `chrome-extension://<id>`; non-browser test clients may omit Origin. First message within 5s: `{type:'hello',protocol:2,token,instanceId,browser:'Microsoft Edge',version:'2.0.1'}`. The persistent instanceId is a UUID stored in extension local storage. Reply `{type:'welcome',protocol:2,daemonId}` or close. daemonId is unique per daemon run; a changed value invalidates extension ownership mirrors. A newer authenticated connection replaces only the same instanceId. Old pending commands fail; replies must belong to their originating socket.
+Connect `ws://127.0.0.1:9224/extension`. Browser Origin must be `chrome-extension://<id>`; non-browser test clients may omit Origin. First message within 5s: `{type:'hello',protocol:2,token,instanceId,browser:'Microsoft Edge',version:'2.0.2'}`. The persistent instanceId is a UUID stored in extension local storage. Reply `{type:'welcome',protocol:2,daemonId}` or close. daemonId is unique per daemon run; a changed value invalidates extension ownership mirrors. A newer authenticated connection replaces only the same instanceId. Old pending commands fail; replies must belong to their originating socket.
 
 Daemon sends `{type:'command',id,action,tabId?,args,session:{id,client,label?}}`. Extension replies `{type:'result',id,ok:true,result}` or `{type:'result',id,ok:false,error:{code,message}}`. Daemon can send `{type:'cancel',id}`. Ping/pong JSON messages keep the MV3 service worker alive. Extension serializes tab actions and honors cancellation during waits; daemon also serializes operations and checks ownership when executing the queue.
 

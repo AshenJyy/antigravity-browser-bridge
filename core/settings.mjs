@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 import { mkdir, open, readFile, lstat } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 
-export const VERSION = '2.0.1';
+export const VERSION = '2.0.2';
 export const PROTOCOL = 2;
 
 export class BridgeError extends Error {
