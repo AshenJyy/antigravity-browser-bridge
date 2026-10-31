@@ -30,7 +30,7 @@ if ($sourceRoot -ne $targetRoot) {
         Write-Host "Previous installation preserved at $backupPath"
     }
     New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
-    foreach ($entry in @('runtime', 'extension', 'skills', 'docs', 'scripts', 'plugin.json', 'mcp_config.json', 'README.md', 'LICENSE')) {
+    foreach ($entry in @('runtime', 'extension', 'skills', 'docs', 'scripts', 'plugin.json', 'mcp_config.json', 'README.md', 'README.en.md', 'CHANGELOG.md', 'LICENSE')) {
         $sourcePath = Join-Path $sourceRoot $entry
         if (Test-Path -LiteralPath $sourcePath) { Copy-Item -LiteralPath $sourcePath -Destination $targetRoot -Recurse -Force }
     }

@@ -10,7 +10,7 @@
   "engines": { "node": ">=22", "dsh": ">=0.2.1-rc.3 <=0.2.1" },
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
   "keywords": ["dsh-plugin", "browser-bridge", "edge", "antigravity", "mcp"],
-  "files": ["adapters/", "core/", "extension/", "runtime/", "scripts/", "skills/", "docs/", "cordis.patch.yml", "plugin.json", "mcp_config.json", "README.md", "LICENSE"],
+  "files": ["adapters/", "core/", "extension/", "runtime/", "scripts/", "skills/", "docs/", "cordis.patch.yml", "plugin.json", "mcp_config.json", "README.md", "README.en.md", "CHANGELOG.md", "LICENSE"],
   "scripts": {
     "start": "node core/service.mjs",
     "bridge": "node scripts/cli.mjs",

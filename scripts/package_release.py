@@ -43,7 +43,7 @@ def main():
                 archive.addfile(info, stream)
 
     plugin_files = files(["plugin.json", "mcp_config.json", "runtime", "extension", "skills", "docs",
-                          "scripts/BrowserBridge.ps1", "scripts/Install-Antigravity.ps1", "scripts/Repair-Pairing.ps1", "README.md", "LICENSE",
+                          "scripts/BrowserBridge.ps1", "scripts/Install-Antigravity.ps1", "scripts/Repair-Pairing.ps1", "README.md", "README.en.md", "CHANGELOG.md", "LICENSE",
                           "start_server.bat", "start_silent.vbs"])
     zipped = destination / f"browser-bridge-antigravity-{version}.zip"
     with zipfile.ZipFile(zipped, "w", compression=zipfile.ZIP_DEFLATED) as archive:

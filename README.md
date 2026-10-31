@@ -1,61 +1,75 @@
 # Browser Bridge
 
-让 **DeepSeek Harness Desktop 和 Antigravity App**直接操作日常使用、已经登录的 Microsoft Edge。DSH 使用原生插件注册工具，Antigravity App 使用 MCP 插件；两端共用本地桥接与 Edge 扩展。基于原 Antigravity Browser Bridge 重构，保留 Apache-2.0 许可和原项目来源。
+让 **DeepSeek Harness Desktop 和 Antigravity App** 直接操作日常使用、已经登录的 **Microsoft Edge**。
 
-DSH 版本范围为 `>=0.2.1-rc.3 <=0.2.1`，允许 rc.3 及后续 `0.2.1-rc.*` 和 `0.2.1` 正式版，无需逐个登记版本；`0.2.2` 及其他版本不在范围内。宿主版本和 DSH peer 依赖采用相同范围，开发依赖仍固定在 rc.3。
+DSH 通过原生插件调用浏览器工具，Antigravity App 通过 MCP 调用；两端共用本地桥接服务和 Edge 扩展，可读取页面、截图、点击、输入和管理标签页。
 
-**v2.0.2 发布状态：已实现并打包，按要求未运行测试或双宿主端到端验收；版本范围放宽不代表已验证每个版本。**
+**中文** · [English](README.en.md) · [下载 v2.0.2](https://github.com/AshenJyy/browser-bridge/releases/tag/v2.0.2) · [安装说明](docs/INSTALL.zh-CN.md) · [文档目录](docs/README.md) · [更新记录](CHANGELOG.md)
 
-## 安装
+## 下载与安装
 
-下载 [v2.0.2 发布包](https://github.com/AshenJyy/browser-bridge/releases/tag/v2.0.2)，完整步骤见 [中文安装说明](docs/INSTALL.zh-CN.md)。
+| 使用入口 | 下载 | 安装方式 |
+| --- | --- | --- |
+| DSH Desktop | [dsh-browser-bridge-2.0.2.tgz](https://github.com/AshenJyy/browser-bridge/releases/download/v2.0.2/dsh-browser-bridge-2.0.2.tgz) | 在 DSH 插件管理中添加本地包，再重启相关工作配置或服务 |
+| Antigravity App | [browser-bridge-antigravity-2.0.2.zip](https://github.com/AshenJyy/browser-bridge/releases/download/v2.0.2/browser-bridge-antigravity-2.0.2.zip) | 解压后运行 `scripts/Install-Antigravity.ps1`，再重启 App |
+| Microsoft Edge | 上述 ZIP 内的 `browser-bridge/extension/`，或源码中的 [`extension/`](extension/) | 在 `edge://extensions` 开启开发者模式，加载解压缩的扩展 |
 
-- DSH：下载 [dsh-browser-bridge-2.0.2.tgz](https://github.com/AshenJyy/browser-bridge/releases/download/v2.0.2/dsh-browser-bridge-2.0.2.tgz)，在插件管理中添加本地包，使用官方 `dsh.bundle.patch` / Cordis 插件格式。当前 DSH 对话直接调用 `browser_*` 工具。
-- Antigravity App：下载并解压 [browser-bridge-antigravity-2.0.2.zip](https://github.com/AshenJyy/browser-bridge/releases/download/v2.0.2/browser-bridge-antigravity-2.0.2.zip)，运行 `scripts/Install-Antigravity.ps1`，重启 App。安装器配置 App 官方全局插件目录和本地 MCP 服务。
-- Edge：在 `edge://extensions` 加载 `extension/`，运行 `scripts/BrowserBridge.ps1 pair`，在扩展弹窗填写本地配对 token。
+仅使用 DSH 时，也可以从 ZIP 中提取 Edge 扩展，无需安装 Antigravity App 插件。
 
-发布 ZIP 自带打包后的 JavaScript 运行文件，无需额外安装 Python 或 npm 依赖。需要 Node.js 22+；Windows 脚本可使用 DSH 自带 Node 运行时。源码开发使用 Node.js 与 npm/pnpm。
+完成插件和扩展安装后，在解压后的 `browser-bridge` 目录中执行：
 
-## 能力
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\BrowserBridge.ps1 pair
+```
 
-27 个统一 `browser_*` 工具覆盖标签页管理、正文与结构化快照、指定标签截图、DOM/坐标点击、悬停、输入、按键、滚动、下拉选择、导航、等待、上传、下载与对话框。DSH 通过官方多模态附件适配返回截图；Antigravity 通过标准 MCP image block 返回。
+将输出的令牌和端口填入 Edge 扩展弹窗。正常只需配对一次；后续调用会按需启动桥接服务。完整步骤、自定义配置和配对故障处理见 [安装说明](docs/INSTALL.zh-CN.md)。
 
-- 复用真实 Edge 的登录状态，以扩展持久实例 ID 区分多个配置。
-- 标签句柄包含实例身份，操作前须新建或明确接管；无活动页隐式回退。
-- DSH 按 Agent/Session、Antigravity 按 MCP 进程隔离；共享 MCP 进程的聊天不自动获得独立身份。
-- 按任务显示标签组，关闭/释放均有明确动作；释放不会关闭用户页面。
-- 本地 token 配对、HTTP/WS 来源检查、串行执行、断线重连及不重放副作用的错误处理。
+## 版本要求
 
-浏览器内部页、原生系统窗口、封闭组件等受浏览器接口限制。截图需要宿主模型支持图像。工具结果会交给宿主模型，不能宣称“网页内容绝不离开本机”。详细范围及未验收项见安装说明。
+| 组件 | 要求 |
+| --- | --- |
+| DSH Desktop | `>=0.2.1-rc.3 <=0.2.1`，允许 rc.3 及后续 `0.2.1-rc.*` 和 `0.2.1` 正式版，无需逐个登记 |
+| Node.js | 22+；Windows 脚本优先使用 DSH 自带运行时 |
+| Microsoft Edge | 125+，使用已加载 Browser Bridge 扩展的浏览器配置 |
+| Antigravity | 支持插件的 Antigravity App |
 
-## 架构
+发布 ZIP 自带 JavaScript 运行文件，使用时无需安装 Python 或 npm 依赖。DSH 直接注册原生工具，无需 agy 或外部子代理。
+
+**发布状态：** v2.0.2 已构建和打包，未运行自动化测试、逐版本验证或双宿主端到端验收。声明的版本范围不等于每个版本都已经验证。
+
+## 可以做什么
+
+- **读取页面：** 正文、结构化快照、真实标签页截图。
+- **操作网页：** 点击、悬停、输入、按键、滚动、下拉选择、导航与等待。
+- **处理文件与对话框：** 文件上传、工具发起的下载、JavaScript 对话框。
+- **管理标签页：** 列举、新建、明确接管、分组、释放与关闭。
+
+27 个统一 `browser_*` 工具复用现有 Edge 的登录状态。截图以图像工具结果返回，所选模型需要支持图像。每次操作都指定标签句柄，不会默认操作当前活动页面。
+
+DSH 按 Agent/Session 分配标签归属；Antigravity 按 MCP 进程分配。共享同一 MCP 进程的聊天不自动获得独立身份。浏览器内部页和原生系统窗口不在操作范围内，其他限制见 [范围与限制](docs/INSTALL.zh-CN.md#范围与限制)。
+
+## 如何连接
 
 ```mermaid
 flowchart LR
-  D[DSH native tools] --> B[Shared Node bridge]
-  A[Antigravity App] --> M[MCP stdio adapter]
+  D[DSH 原生插件] --> B[本地 Browser Bridge]
+  A[Antigravity App] --> M[MCP 适配器]
   M --> B
-  C[CLI] --> B
-  B <-->|Authenticated WebSocket| E[Edge MV3 extension]
-  E --> T[Real browser tabs]
+  B <-->|令牌认证| E[Edge 扩展]
+  E --> T[日常浏览器标签页]
 ```
 
-默认监听 `127.0.0.1:9224`，按需后台启动。Windows 状态与 token 默认放在 `%USERPROFILE%\.browser-bridge`，避开桌面应用的 AppData 路径重定向；升级时会保留并迁移有效的旧默认令牌。`BROWSER_BRIDGE_PORT`、`BROWSER_BRIDGE_DATA_DIR` 可配置，DSH 原生插件也提供 `port`、`dataDir` 配置项。两端须使用相同设置，正常只需配对一次。
+默认监听 `127.0.0.1:9224`。Windows 状态和令牌保存在 `%USERPROFILE%\.browser-bridge`；端口与状态目录可配置。两端使用相同设置即可共享桥接服务。页面内容和截图会交给所用宿主与模型处理。
 
-协议见 [PROTOCOL.md](docs/PROTOCOL.md)，Agent 操作说明见 [SKILL.md](skills/browser-bridge/SKILL.md)。v1 HTTP 路由和数字标签 ID 已退役；旧 Python 入口只转发至 Node，新 CLI 参数见 `--help`。
+## 文档与源码
 
-## 构建
+| 入口 | 内容 |
+| --- | --- |
+| [文档目录](docs/README.md) | 安装、开发、协议和旧版入口的导航 |
+| [开发说明](docs/DEVELOPMENT.md) | 源码目录、构建方式与发布包结构 |
+| [协议说明](docs/PROTOCOL.md) | HTTP、WebSocket 和会话约定 |
+| [旧版启动入口](docs/LEGACY.md) | Python 转发器、手动启动和开机自启脚本的用途 |
+| [更新记录](CHANGELOG.md) | 各版本的变更 |
+| [Issues](https://github.com/AshenJyy/browser-bridge/issues) | 问题反馈与功能建议 |
 
-```powershell
-pnpm install --frozen-lockfile
-node scripts/build.mjs
-py scripts/package_release.py --output work/releases
-```
-
-构建生成独立 runtime；打包生成 npm-compatible DSH `.tgz` 和 Antigravity `.zip`，不安装、不启动宿主、不调用模型。仓库包含开发测试文件，但本次发布未执行测试。
-
-## English
-
-Browser Bridge gives DSH Desktop and Antigravity App direct access to the user's real Edge profile. DSH calls native plugin tools; Antigravity App uses stdio MCP. Both connect to the same authenticated local bridge and MV3 extension. The DSH host and peer dependency range is `>=0.2.1-rc.3 <=0.2.1`, admitting subsequent 0.2.1 release candidates and the stable 0.2.1 release without listing each version. Development dependencies remain pinned to rc.3. Select or claim explicit tab handles; no command silently acts on the active page. Screenshots are actual image tool results. Windows hosts share `%USERPROFILE%\.browser-bridge` state. Version 2.0.2 has not undergone automated tests, cross-version verification, or end-to-end host acceptance. Download the packages from the [v2.0.2 release](https://github.com/AshenJyy/browser-bridge/releases/tag/v2.0.2).
-
-Original project: [AshenJyy/antigravity-browser-bridge](https://github.com/AshenJyy/antigravity-browser-bridge). License: [Apache-2.0](LICENSE).
+本项目由原 Antigravity Browser Bridge 重构，采用 [Apache-2.0](LICENSE) 许可，是面向 DSH 与 Antigravity App 的社区插件。

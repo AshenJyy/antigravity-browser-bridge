@@ -1,6 +1,8 @@
 # 安装 Browser Bridge 2.0
 
-本版用于 **DeepSeek Harness Desktop 和 Antigravity App**。DSH 宿主与 `@deepseek-ai/dsh-mcp-client` peer 依赖均声明 `>=0.2.1-rc.3 <=0.2.1`，允许 rc.3 及后续 `0.2.1-rc.*` 和 `0.2.1` 正式版，无需逐个登记版本；不包含 `0.2.2` 及其他版本。两端独立调用浏览器工具，通过同一扩展操作日常 Edge 的标签页和登录状态。v2.0.2 已实现并打包，按要求未运行测试、逐版本验证或双宿主端到端验收。
+[返回首页](../README.md) · [文档目录](README.md) · [更新记录](../CHANGELOG.md)
+
+本版用于 **DeepSeek Harness Desktop 和 Antigravity App**。DSH 宿主与 `@deepseek-ai/dsh-mcp-client` peer 依赖均声明 `>=0.2.1-rc.3 <=0.2.1`，允许 rc.3 及后续 `0.2.1-rc.*` 和 `0.2.1` 正式版，无需逐个登记版本；不包含 `0.2.2` 及其他版本。两端独立调用浏览器工具，通过同一扩展操作日常 Edge 的标签页和登录状态。v2.0.2 已实现并打包，未运行测试、逐版本验证或双宿主端到端验收。
 
 ## 1. 安装 DSH 插件
 

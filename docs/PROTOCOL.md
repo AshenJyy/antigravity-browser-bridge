@@ -1,5 +1,7 @@
 # Browser Bridge protocol v2
 
+[Overview](../README.en.md) · [Documentation](README.md)
+
 All control stays on `127.0.0.1:9224` (configurable through `BROWSER_BRIDGE_PORT`). HTTP requires `Authorization: Bearer <token>` except a minimal `GET /health`. Windows state defaults to `%USERPROFILE%\.browser-bridge`, outside packaged-app AppData redirection; macOS/Linux use their platform user-local state directories. `BROWSER_BRIDGE_DATA_DIR` overrides it. DSH also exposes `port` and `dataDir` in its native plugin configuration. Both hosts must use the same state and port. The Windows default imports a valid legacy `%LOCALAPPDATA%\BrowserBridge\token` only when creating the new token file. Persist the token using exclusive creation and never log it. HTTP requests with an Origin header are rejected; the extension uses WebSocket.
 
 ## Host API
